@@ -11,13 +11,13 @@ DeviceClasses, ResourceSlices, clientsets, namespace paths or journal handles.
 | `pluginapi` | Serializable configuration, opaque references, effects, four lifecycle hook names and response-scope checks |
 
 MVP builtin planners live in `pkg/networkplugins` and execute through ordinary
-Go calls. All eight plugin families, including OVS and accelerated bridge,
+Go calls. All plugin families, including OVS, accelerated bridge and the IPAM/address planners,
 use this boundary. `pkg/topology/plan.go` binds inputs and validates results. CRD effect
 templates remain declarative framework compilation; they cannot become new
 physical authority. Native execution and recorded compensation stay behind the
 framework's grant and journal checks.
 
-GA moves **all plugin implementations**, including OVS and accelerated bridge,
+GA moves **all plugin implementations**, including OVS, accelerated bridge and the IPAM/address planners,
 outside the DRA process behind gRPC. The same request/result contract is used;
 changing transport does not transfer DRA publication, admission, journal or
 allocation authority to a plugin. A remote result still passes scope, schema,

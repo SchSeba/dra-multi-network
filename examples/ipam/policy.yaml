@@ -1,0 +1,26 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata:
+  name: ipam-macvlan
+spec:
+  priority: 100
+  selector:
+    kind: PF
+    pciAddresses:
+    - '0000:29:00.0'
+  action: Expose
+  exposure:
+    persona: ipam-macvlan
+    plugin: macvlan-cni
+    mode: bridge
+    allowMultipleAllocations: true
+    capacity:
+      children:
+        value: '6'
+        default: '1'
+        validValues:
+        - '1'
+    effectPermissions:
+    - linux/create-macvlan/v1
+    - linux/link-configure/v1
+    - linux/address-configure/v1

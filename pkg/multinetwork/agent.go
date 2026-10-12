@@ -30,6 +30,7 @@ import (
 	"github.com/SchSeba/dra-multi-network/pkg/cdi"
 	nodeconfig "github.com/SchSeba/dra-multi-network/pkg/config"
 	"github.com/SchSeba/dra-multi-network/pkg/effects"
+	"github.com/SchSeba/dra-multi-network/pkg/ipam"
 	"github.com/SchSeba/dra-multi-network/pkg/journal"
 	"github.com/SchSeba/dra-multi-network/pkg/topology"
 )
@@ -54,7 +55,13 @@ type Root struct {
 	Persona      Persona                                   `json:"persona"`
 	CDIDeviceIDs []string                                  `json:"cdiDeviceIDs,omitempty"`
 }
+type IPAMRoot struct {
+	Step   string                                    `json:"step"`
+	Result resourceapi.DeviceRequestAllocationResult `json:"result"`
+	Lease  ipam.Lease                                `json:"lease"`
+}
 type Preparation struct {
+	IPAMRoots   []IPAMRoot                  `json:"ipamRoots,omitempty"`
 	Claim       resourceapi.ResourceClaim   `json:"claim"`
 	Fingerprint string                      `json:"fingerprint"`
 	Revision    api.NetworkTopologyRevision `json:"revision"`
@@ -87,6 +94,7 @@ type Agent struct {
 	dir            string
 	store          *journal.Store
 	helper         *kubeletplugin.Helper
+	ipamHelper     *kubeletplugin.Helper
 	stub           stub.Stub
 	mutation       chan struct{}
 	inventory      map[string]Inventory
@@ -175,6 +183,15 @@ func Run(ctx context.Context, config *nodeconfig.Config) error {
 		return err
 	}
 	defer a.helper.Stop()
+	ipamPath := filepath.Join(config.Flags.KubeletPluginsDirectoryPath, topology.IPAMDriver)
+	if err := os.MkdirAll(ipamPath, 0750); err != nil {
+		return err
+	}
+	a.ipamHelper, err = kubeletplugin.Start(ctx, &ipam.Driver{Store: ipam.Store{Client: a.client, Namespace: config.Flags.Namespace}, NodeName: a.node.Name, Cancel: config.CancelMainCtx}, kubeletplugin.KubeClient(config.K8sClient.Interface), kubeletplugin.NodeName(a.node.Name), kubeletplugin.DriverName(topology.IPAMDriver), kubeletplugin.RegistrarDirectoryPath(config.Flags.KubeletRegistrarDirectoryPath), kubeletplugin.PluginDataDirectoryPath(ipamPath))
+	if err != nil {
+		return err
+	}
+	defer a.ipamHelper.Stop()
 	nriOptions := []stub.Option{stub.WithOnClose(func() { config.CancelMainCtx(fmt.Errorf("NRI disconnected")) })}
 	if os.Getenv("NRI_PLUGIN_NAME") == "" {
 		nriOptions = append(nriOptions, stub.WithPluginName("dra-multi-network"))
@@ -201,7 +218,7 @@ func Run(ctx context.Context, config *nodeconfig.Config) error {
 	defer cancel()
 	registrationTicker := time.NewTicker(100 * time.Millisecond)
 	defer registrationTicker.Stop()
-	for a.helper.RegistrationStatus() == nil || !a.helper.RegistrationStatus().PluginRegistered {
+	for a.helper.RegistrationStatus() == nil || !a.helper.RegistrationStatus().PluginRegistered || a.ipamHelper.RegistrationStatus() == nil || !a.ipamHelper.RegistrationStatus().PluginRegistered {
 		select {
 		case <-registrationCtx.Done():
 			return fmt.Errorf("E_KUBELET_REGISTRATION: %w", registrationCtx.Err())
@@ -387,10 +404,19 @@ func (a *Agent) prepare(ctx context.Context, claim *resourceapi.ResourceClaim) (
 	var revisionRef api.RevisionRef
 	p = Preparation{Claim: *claim.DeepCopy(), Fingerprint: fingerprint, State: Preparing, NodeUID: string(a.node.UID), BootID: a.boot}
 	for _, result := range claim.Status.Allocation.Devices.Results {
-		if result.Driver != api.Driver {
+		if result.Driver != api.Driver && result.Driver != topology.IPAMDriver {
 			continue
 		}
-		if result.Pool != a.node.Name || result.AdminAccess != nil && *result.AdminAccess {
+		if result.Driver == topology.IPAMDriver {
+			bound := false
+			for _, config := range resourceclaim.ConfigForResult(claim.Status.Allocation.Devices.Config, result) {
+				bound = bound || config.Opaque != nil && config.Opaque.Driver == api.Driver
+			}
+			if !bound {
+				continue
+			}
+		}
+		if result.Driver == api.Driver && result.Pool != a.node.Name || result.AdminAccess != nil && *result.AdminAccess {
 			return p, fmt.Errorf("E_ALLOCATION_SCOPE")
 		}
 		requestOK := false
@@ -433,6 +459,44 @@ func (a *Agent) prepare(ctx context.Context, claim *resourceapi.ResourceClaim) (
 			}
 		} else if revisionRef != binding.RevisionRef {
 			return p, fmt.Errorf("E_REVISION_MIXED")
+		}
+
+		var rootStep api.Step
+		var rootPlugin api.PluginSpec
+		for _, step := range p.Revision.Spec.Topology.Steps {
+			if step.ID == binding.RootStep {
+				rootStep = step
+			}
+		}
+		for _, plugin := range p.Revision.Spec.Plugins {
+			if plugin.Name == rootStep.PluginRef.Name && plugin.Digest == binding.PluginContractDigest {
+				rootPlugin = plugin.Spec
+			}
+		}
+		if rootStep.Kind != topology.AllocationKind || topology.AllocationDriver(rootPlugin) != result.Driver {
+			return p, fmt.Errorf("E_ROOT_DRIVER_CONTRACT")
+		}
+		if result.Driver == topology.IPAMDriver {
+			expected, err := topology.ConfigForPlugin(rootStep, rootPlugin)
+			if err != nil {
+				return p, err
+			}
+			actual, err := ipam.Entitlement(claim, result)
+			if err != nil {
+				return p, err
+			}
+			if topology.Digest(actual) != topology.Digest(expected) {
+				return p, fmt.Errorf("E_IPAM_ROOT_CONFIG")
+			}
+			pool, err := a.ipamStore().ForConfig(ctx, actual)
+			if err != nil {
+				return p, err
+			}
+			if result.Pool != pool.Object.Name || result.Device != "subnet" {
+				return p, fmt.Errorf("E_IPAM_ALLOCATION_SCOPE")
+			}
+			p.IPAMRoots = append(p.IPAMRoots, IPAMRoot{Step: binding.RootStep, Result: result, Lease: ipam.Reservation(claim, result, pool)})
+			continue
 		}
 		persona, exists := a.personas[result.Device]
 		if !exists {
@@ -497,6 +561,9 @@ func (a *Agent) prepare(ctx context.Context, claim *resourceapi.ResourceClaim) (
 	}
 	if len(p.Roots) == 0 {
 		return p, fmt.Errorf("E_ROOT_COVERAGE: empty")
+	}
+	if err := a.validateIPAMFabric(ctx, p); err != nil {
+		return p, err
 	}
 	if err := a.checkRetirement(revisionRef); err != nil {
 		return p, err

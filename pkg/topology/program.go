@@ -48,9 +48,12 @@ func ValidateProgram(p EffectProgram, budget []string) error {
 			return fmt.Errorf("E_EFFECT_DENIED: %s", e.Kind)
 		}
 		switch e.Kind {
-		case Move, Configure, CreateBond, AttachMaster, CreateVLAN, CreateMacvlan, CreateIPvlan, DriverBind, DeviceAccess, VFConfigure, PCIReset, RDMANamespace, RepresentorMap, BridgeConfigure, OVSConfigure, UplinkConfigure:
+		case Move, Configure, CreateBond, AttachMaster, CreateVLAN, CreateMacvlan, CreateIPvlan, DriverBind, DeviceAccess, VFConfigure, PCIReset, RDMANamespace, RepresentorMap, BridgeConfigure, OVSConfigure, UplinkConfigure, AddressConfigure:
 		default:
 			return fmt.Errorf("E_EFFECT_OPCODE: %s", e.Kind)
+		}
+		if e.Kind == AddressConfigure && (len(e.Inputs) != 2 || e.Inputs[InterfacePort].From == "" || e.Inputs[LeasePort].From == "" || Digest(e.Parameters) != Digest(Config{})) {
+			return fmt.Errorf("E_ADDRESS_PAYLOAD")
 		}
 		if e.Kind == BridgeConfigure || e.Kind == OVSConfigure || e.Kind == UplinkConfigure {
 			if err := ValidateBridgeConfig(e.Parameters); err != nil {
@@ -147,7 +150,7 @@ func opcodeSchema(kind string) (ext.JSON, map[string]string, error) {
 	case RepresentorMap:
 		common, required = map[string]any{}, nil
 		inputs[DevicePort] = "ExclusiveConfigure"
-	case BridgeConfigure, OVSConfigure, UplinkConfigure:
+	case BridgeConfigure, OVSConfigure, UplinkConfigure, AddressConfigure:
 		for _, plugin := range switchdevProfiles(nil) {
 			if plugin.Name == AcceleratedBridgePlugin && kind != UplinkConfigure || plugin.Name == AcceleratedBridgePlugin+"-uplink" && kind == UplinkConfigure {
 				return plugin.Spec.ConfigSchema, map[string]string{RepresentorPort: AccessExclusiveMaster}, nil

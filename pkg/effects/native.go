@@ -25,11 +25,14 @@ import (
 	"k8s.io/klog/v2"
 
 	api "github.com/SchSeba/dra-multi-network/pkg/api/networking/v1alpha1"
+	"github.com/SchSeba/dra-multi-network/pkg/ipam"
 	"github.com/SchSeba/dra-multi-network/pkg/journal"
 	"github.com/SchSeba/dra-multi-network/pkg/topology"
 )
 
 type Handle struct {
+	Address             string                `json:"address,omitempty"`
+	Lease               *ipam.Lease           `json:"lease,omitempty"`
 	Type                string                `json:"type"`
 	Scope               string                `json:"scope"`
 	Name                string                `json:"name"`
@@ -378,6 +381,9 @@ func (n *Native) Preflight(ex Execution) error {
 		grants["call.allocation."+id] = root
 	}
 	for _, root := range ex.Roots {
+		if root.Type == topology.AddressLeaseType {
+			continue
+		}
 		if root.Type == topology.RDMAType {
 			continue // The namespace effect supplies its locked profile below.
 		}
@@ -521,6 +527,13 @@ func (n *Native) Execute(ex *Execution, save func() error) error {
 					return fmt.Errorf("E_SHARED_PARENT_MUTATION")
 				}
 			}
+			if e.Kind == topology.AddressConfigure {
+				var err error
+				rec.Output, err = n.captureAddress(rec.Inputs)
+				if err != nil {
+					return err
+				}
+			}
 			if e.Kind == topology.DriverBind || e.Kind == topology.PCIReset {
 				var err error
 				if e.Kind == topology.PCIReset {
@@ -640,6 +653,9 @@ func (n *Native) Execute(ex *Execution, save func() error) error {
 	return save()
 }
 func (n *Native) apply(r *Record, save func() error) error {
+	if r.Effect.Kind == topology.AddressConfigure {
+		return n.applyAddress(*r)
+	}
 	if r.Effect.Kind == topology.UplinkConfigure {
 		return n.applyUplink(r)
 	}
@@ -879,6 +895,9 @@ func (n *Native) apply(r *Record, save func() error) error {
 	}
 }
 func (n *Native) observe(r Record) error {
+	if r.Effect.Kind == topology.AddressConfigure {
+		return n.observeAddress(r)
+	}
 	if r.Effect.Kind == topology.UplinkConfigure {
 		return n.observeUplink(r)
 	}
@@ -967,6 +986,9 @@ func (n *Native) Verify(ex Execution) error {
 		}
 	}
 	for _, h := range ex.Outputs {
+		if h.Type == topology.AddressLeaseType {
+			continue
+		}
 		if h.Type == topology.RDMAType {
 			if err := VerifyRDMADevice(h); err != nil {
 				return err
@@ -989,6 +1011,16 @@ func (n *Native) Restore(ex *Execution, save func() error) error {
 	for i := len(ex.Records) - 1; i >= 0; i-- {
 		r := &ex.Records[i]
 		if r.State == Restored {
+			continue
+		}
+		if r.Effect.Kind == topology.AddressConfigure {
+			if err := n.restoreAddress(*r); err != nil {
+				return err
+			}
+			r.State = Restored
+			if err := save(); err != nil {
+				return err
+			}
 			continue
 		}
 		if r.Effect.Kind == topology.OVSConfigure {

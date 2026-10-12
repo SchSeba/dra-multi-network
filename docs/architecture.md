@@ -77,3 +77,13 @@ ends the node process so normal restart can reconnect.
 Same-boot agent restart and selected lost-acknowledgement paths have been tested.
 Do not equate these checks with complete host-reboot recovery; see
 [validation](validation.md) and [operations](operations.md).
+
+## IPAM allocation roots
+
+The controller also publishes subnet ResourceSlices for `ipam.schseba.github.io`,
+and the existing node process registers that second DRA driver. A topology can
+request network and address roots in one claim. IPAM prepares concrete addresses
+in a protected, persistent ConfigMap ledger; NRI acquires attachment holders and
+executes recorded address effects before containers start. Cleanup removes owned
+address use before releasing holders. DRA capacity and concrete address ownership
+remain separate accounting layers. See [IPAM](ipam-plan.md) and its examples.

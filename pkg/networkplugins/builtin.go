@@ -28,7 +28,7 @@ func Run(call sdk.Request) (sdk.Result, error) {
 		return result, fmt.Errorf("E_PLUGIN_CALL_IDENTITY")
 	}
 	switch call.Plugin {
-	case hostPlugin, sriovPlugin, macvlanPlugin, ipvlanPlugin, "bond-cni", "vlan-cni", "accelerated-bridge-cni", ovsPlugin:
+	case hostPlugin, sriovPlugin, macvlanPlugin, ipvlanPlugin, "bond-cni", "vlan-cni", "accelerated-bridge-cni", ovsPlugin, "ipam", "address-cni":
 	default:
 		return result, fmt.Errorf("E_PLUGIN_IMPLEMENTATION: %s", call.Plugin)
 	}
@@ -40,6 +40,12 @@ func Run(call sdk.Request) (sdk.Result, error) {
 		return result, sdk.ValidateResult(call, result)
 	}
 	c, p := call.Config, &result.Program
+	if call.Plugin == "ipam" {
+		if call.Hook == sdk.ConnectNetwork {
+			p.Exports["lease"] = call.Allocation
+		}
+		return result, sdk.ValidateResult(call, result)
+	}
 	add := func(id, kind string, c sdk.Config, inputs map[string]sdk.EffectRef) {
 		strategy := "ObserveAndReconcile"
 		if kind == sdk.PCIReset {
@@ -73,6 +79,15 @@ func Run(call sdk.Request) (sdk.Result, error) {
 	}
 	if call.Hook != sdk.ConnectNetwork {
 		return result, fmt.Errorf("E_PLUGIN_HOOK_CONTRACT")
+	}
+	if call.Plugin == "address-cni" {
+		if len(call.Inputs["interface"]) != 1 || len(call.Inputs["lease"]) != 1 {
+			return result, fmt.Errorf("E_PLUGIN_PORT_CARDINALITY")
+		}
+		id := call.ID + "-address"
+		add(id, "linux/address-configure/v1", sdk.Config{}, map[string]sdk.EffectRef{"interface": call.Inputs["interface"][0], "lease": call.Inputs["lease"][0]})
+		p.Exports["configured"] = sdk.EffectRef{From: "effects." + id + ".interface"}
+		return result, sdk.ValidateResult(call, result)
 	}
 	if call.Plugin == "accelerated-bridge-cni" || call.Plugin == ovsPlugin {
 		ports := call.Inputs[sdk.RepresentorPort]

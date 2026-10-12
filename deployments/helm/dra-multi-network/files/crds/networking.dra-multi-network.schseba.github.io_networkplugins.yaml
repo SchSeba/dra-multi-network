@@ -37,6 +37,10 @@ spec:
             type: object
           spec:
             properties:
+              allocationDriver:
+                description: AllocationDriver is set only by the certified IPAM allocation
+                  contract.
+                type: string
               allocationProfileRef:
                 description: Programmable roots retain a certified allocation/ownership
                   contract.

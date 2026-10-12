@@ -11,6 +11,7 @@ read them before running. Drain earlier consumers of the same resources first.
 
 | Directory | Checks / fixture |
 |---|---|
+| [ipam](ipam/README.md) | Address capacity, traffic, exhaustion/reuse/restart and two VFs with two IPs |
 | `bond-vlan` | Two-Pod traffic and failover; [example](../../examples/bond-vlan/README.md) |
 | `shared` | Mixed PF-macvlan/VF-ipvlan traffic and same-VF handoff exclusion |
 | `vfio` | VFIO lifecycle and per-container/request access |

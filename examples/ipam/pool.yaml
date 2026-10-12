@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ipam-blue
+  namespace: dra-multi-network
+  labels:
+    ipam.schseba.github.io/pool: 'true'
+immutable: true
+data:
+  config: '{"network":"blue","subnet":"192.0.2.0/29","gateway":"192.0.2.1","nodeSelector":{"dra-multi-network.schseba.github.io/ready":"true"},"parentPCIAddresses":["0000:29:00.0"]}'

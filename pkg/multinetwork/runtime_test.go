@@ -453,3 +453,17 @@ func TestStatusProjectionSurvivesDeletedNamespacesAndBrokenRecords(t *testing.T)
 		}
 	}
 }
+
+func TestUnrelatedIPAMAllocationIsNotATopologyRoot(t *testing.T) {
+	store, err := journal.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	claim := &resourceapi.ResourceClaim{ObjectMeta: metav1.ObjectMeta{UID: "claim"}, Status: resourceapi.ResourceClaimStatus{Allocation: &resourceapi.AllocationResult{Devices: resourceapi.DeviceAllocationResult{Results: []resourceapi.DeviceRequestAllocationResult{{Driver: topology.IPAMDriver, Request: "unrelated", Pool: "external", Device: "subnet"}}}}}}
+	agent := Agent{store: store}
+	_, err = agent.prepare(context.Background(), claim)
+	if err == nil || !strings.Contains(err.Error(), "E_ROOT_COVERAGE: empty") {
+		t.Fatal("foreign allocation was treated as a project root", err)
+	}
+}

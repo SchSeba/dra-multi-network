@@ -78,6 +78,7 @@ func TestMVPController(t *testing.T) {
 	testNodeCapabilities(t, ctx, c, object, revision)
 	testProgrammableRoot(t, ctx, c, reconciler)
 	testIBController(t, ctx, c, reconciler)
+	testIPAMController(t, ctx, c, reconciler)
 	revision.Spec.Digest = "changed"
 	if err := c.Update(ctx, &revision); err == nil {
 		t.Fatal("revision mutation accepted")
@@ -206,5 +207,41 @@ func testProgrammableRoot(t *testing.T, ctx context.Context, c client.Client, re
 	}
 	if meta.IsStatusConditionTrue(object.Status.Conditions, "Ready") || *object.Status.RevisionRef != pinned {
 		t.Fatal("invalid bound root plan replaced the pinned revision")
+	}
+}
+
+func testIPAMController(t *testing.T, ctx context.Context, c client.Client, r controller.TopologyReconciler) {
+	t.Helper()
+	data, err := os.ReadFile("../../examples/ipam/two-vf/topology.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var object api.NetworkTopology
+	if err := yaml.UnmarshalStrict(data, &object); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Create(ctx, &object); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&object)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(&object), &object); err != nil {
+		t.Fatal(err)
+	}
+	if len(object.Status.RootClasses) != 4 {
+		t.Fatal("two VFs require two interface and two IPAM classes", object.Status)
+	}
+	for _, root := range object.Status.RootClasses {
+		if !strings.HasPrefix(root.RootStep, "address") {
+			continue
+		}
+		var class resourceapi.DeviceClass
+		if err := c.Get(ctx, client.ObjectKey{Name: root.ClassName}, &class); err != nil {
+			t.Fatal(err)
+		}
+		if len(class.Spec.Config) != 2 || class.Spec.Config[0].Opaque.Driver != api.Driver || class.Spec.Config[1].Opaque.Driver != topology.IPAMDriver || strings.Contains(class.Spec.Selectors[0].CEL.Expression, "pciAddress") {
+			t.Fatal("IPAM root inherited physical authority", class.Spec)
+		}
 	}
 }

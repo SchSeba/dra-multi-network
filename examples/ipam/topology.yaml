@@ -1,0 +1,41 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata:
+  name: macvlan-ipam
+spec:
+  effectBudget:
+    allow:
+    - linux/create-macvlan/v1
+    - linux/link-configure/v1
+    - linux/address-configure/v1
+  steps:
+  - id: endpoint
+    kind: Allocation
+    pluginRef:
+      name: macvlan-cni
+    selectors:
+    - device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:00.0"
+    - device.attributes["dra-multi-network.schseba.github.io"].persona == "ipam-macvlan"
+    config:
+      ifName: secondary0
+      mtu: 1500
+      up: true
+      mode: bridge
+      linkType: ethernet
+  - id: address
+    kind: Allocation
+    pluginRef:
+      name: ipam
+    config:
+      network: blue
+      subnet: 192.0.2.0/29
+  - id: configure-address
+    kind: Operation
+    pluginRef:
+      name: address-cni
+    inputs:
+      interface:
+        from: endpoint.interface
+      lease:
+        from: address.lease
+    config: {}

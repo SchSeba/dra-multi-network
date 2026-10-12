@@ -101,3 +101,22 @@ identity, boot ID and journal recovery. Same-boot restart has exercised paths;
 complete reboot recovery and broader hardware restoration remain deferred.
 If foreign state changed, repair the underlying ownership conflict through an
 administrator-reviewed procedure before retrying cleanup.
+
+## IPAM pool operations
+
+Pools are immutable administrator ConfigMaps in the driver namespace, labeled
+`ipam.schseba.github.io/pool: "true"`. The controller creates a backend-owned
+ledger and pins its API UID in the pool annotation. Lease updates use Kubernetes
+resource-version concurrency; the node journal retains attachment-holder intent.
+Observe addresses through NetworkAttachmentStatus. Do not edit lease state or
+remove ledger finalizers to force reuse. A missing/corrupt ledger or unresolved
+orphan use fences new inventory.
+
+Delete consuming Pods and claims, wait for verified cleanup, then delete the pool.
+Active reservations and scheduler allocations block pool deletion; the controller
+removes drained ledger state. A manually managed claim retains its allocation
+after Pod deletion. Recreate a manually managed IPAM claim after unprepare;
+the demo fences reuse of a released claim UID. The demo keeps replay tombstones until pool deletion, with a
+240 KiB bound; continuous use requires safe GC or a larger transactional backend.
+Existing attachments can continue during backend outages, while new connections
+and release work wait for durable evidence. See [IPAM design](ipam-plan.md).

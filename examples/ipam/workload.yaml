@@ -1,0 +1,64 @@
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: CLAIM_TEMPLATE
+  namespace: ipam-example
+spec:
+  spec:
+    devices:
+      requests:
+      - name: endpoint
+        exactly:
+          deviceClassName: ENDPOINT_CLASS
+          allocationMode: ExactCount
+          count: 1
+          capacity:
+            requests:
+              dra-multi-network.schseba.github.io/children: '1'
+      - name: address
+        exactly:
+          deviceClassName: IPAM_CLASS
+          allocationMode: ExactCount
+          count: 1
+          capacity:
+            requests:
+              ipam.schseba.github.io/addresses: '1'
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: POD_NAME
+  namespace: ipam-example
+spec:
+  resourceClaims:
+  - name: network
+    resourceClaimTemplateName: CLAIM_TEMPLATE
+  initContainers:
+  - name: verify-address
+    image: quay.io/schseba/toolbox:latest
+    command:
+    - /bin/bash
+    - -ec
+    - ip -o -4 addr show dev secondary0 scope global | grep -q 'inet '
+    resources:
+      claims:
+      - name: network
+    securityContext:
+      capabilities:
+        add:
+        - NET_ADMIN
+        - NET_RAW
+  containers:
+  - name: app
+    image: quay.io/schseba/toolbox:latest
+    command:
+    - sleep
+    - infinity
+    resources:
+      claims:
+      - name: network
+    securityContext:
+      capabilities:
+        add:
+        - NET_ADMIN
+        - NET_RAW

@@ -68,6 +68,8 @@ type Result struct {
 }
 
 type Config struct {
+	Network           string      `json:"network,omitempty"`
+	Subnet            string      `json:"subnet,omitempty"`
 	IfName            string      `json:"ifName,omitempty"`
 	MTU               int         `json:"mtu,omitempty"`
 	Up                bool        `json:"up,omitempty"`

@@ -76,6 +76,32 @@ test changes were then reversed and the original host snapshot matched. This
 checks native ownership/refcount and before-image restoration, without claiming
 external-wire connectivity.
 
+## IPAM acceptance (2026-10-12)
+
+The same Kubernetes 1.37/CRI-O switchdev-mock lab passed the
+[IPAM suite](../test/integration/ipam/README.md) after redeployment using
+`rrun 'make redeploy-dra-driver-virtual-cluster'`. The dedicated PF was brought
+administratively up after verifying its PCI identity; the primary PF was preserved.
+
+- Five macvlan topology instances received distinct `192.0.2.2`–`.6/29` IPs,
+  with address checks before application start and successful secondary traffic.
+- A sixth complete claim stayed Pending for exhausted IPAM capacity despite
+  an available macvlan slot. Releasing one consumer/claim allowed it to connect.
+- Same-boot node-agent restart preserved active addresses and native verification.
+- One Pod received two distinct VF allocations (`0000:29:10.0` and
+  `0000:29:10.2`) plus two separate IPAM shares, assigning `.2/29` and `.3/29`
+  to `secondary0` and `secondary1` before its init check.
+- Removing both scenarios left every backend reservation Released with no holders.
+  Both VFs returned to host interfaces `msnicv0`/`msnicv1` without allocated IPv4
+  addresses. The primary `eth1` management default route remained intact.
+
+The implementation includes software/race checks, class/controller/admission
+validation, generated schemas, lint/vet and Helm rendering. This validates the
+mock lab, not host reboot recovery, production ledger scale, physical NIC
+performance or external-wire connectivity. The demo's ledger is bounded to
+240 KiB and retains replay tombstones until pool deletion. Released claim UIDs
+are fenced; use per-instance templates or recreate manual claims after unprepare.
+
 ## Hardware acceptance still needed
 
 The VM has no RDMA/InfiniBand device or physical switchdev NIC. Physical RDMA

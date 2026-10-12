@@ -164,6 +164,9 @@ func (r *TopologyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if pluginSpec.Implementation.Type == topology.EffectProgramImplementation {
 			mandatory += fmt.Sprintf(` && device.attributes[%q].pluginContractDigest == %q`, api.Driver, pluginDigest)
 		}
+		if pluginSpec.AllocationDriver == topology.IPAMDriver {
+			mandatory = fmt.Sprintf(`device.driver == %q && device.allowMultipleAllocations == true && device.attributes[%q].network == %q && device.attributes[%q].subnet == %q && device.attributes[%q].allocationReady == true`, topology.IPAMDriver, topology.IPAMDriver, c.Network, topology.IPAMDriver, c.Subnet, topology.IPAMDriver)
+		}
 		selectors := []resourceapi.DeviceSelector{{CEL: &resourceapi.CELDeviceSelector{Expression: mandatory}}}
 		for _, expression := range step.Selectors {
 			selectors = append(selectors, resourceapi.DeviceSelector{CEL: &resourceapi.CELDeviceSelector{Expression: expression}})
@@ -171,6 +174,10 @@ func (r *TopologyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		class := resourceapi.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: className, Labels: map[string]string{ManagedLabel: ManagedLabelValue}, OwnerReferences: []metav1.OwnerReference{{APIVersion: api.GroupVersion.String(), Kind: "NetworkTopologyRevision", Name: revision.Name, UID: revision.UID}}}, Spec: resourceapi.DeviceClassSpec{
 			Selectors: selectors, Config: []resourceapi.DeviceClassConfiguration{{DeviceConfiguration: resourceapi.DeviceConfiguration{Opaque: &resourceapi.OpaqueDeviceConfiguration{Driver: api.Driver, Parameters: runtime.RawExtension{Raw: raw}}}}},
 		}}
+		if pluginSpec.AllocationDriver == topology.IPAMDriver {
+			parameters, _ := json.Marshal(map[string]any{"apiVersion": topology.IPAMDriver + "/v1alpha1", "kind": "IPAMAllocationConfiguration", "network": c.Network, "subnet": c.Subnet, "addresses": 1})
+			class.Spec.Config = append(class.Spec.Config, resourceapi.DeviceClassConfiguration{DeviceConfiguration: resourceapi.DeviceConfiguration{Opaque: &resourceapi.OpaqueDeviceConfiguration{Driver: topology.IPAMDriver, Parameters: runtime.RawExtension{Raw: parameters}}}})
+		}
 		if err := r.Create(ctx, &class); err != nil {
 			if !apierrors.IsAlreadyExists(err) {
 				return ctrl.Result{}, err

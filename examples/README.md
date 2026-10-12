@@ -17,6 +17,7 @@ placeholders and must be rendered by the helper or the README instructions.
 | [single-vf](single-vf/README.md) | One exclusive SR-IOV VF as `secondary0` |
 | [bond-vlan](bond-vlan/README.md) | Two VFs → active-backup bond → three VLANs |
 | [shared](shared/README.md) | PF macvlan with VF ipvlan; shared capacity and exclusive VF conflict |
+| [IPAM](ipam/README.md) | Subnet address capacity, one IP per instance and two-VF/two-IP allocation |
 
 ## Other profiles and customization
 

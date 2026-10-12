@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	api "github.com/SchSeba/dra-multi-network/pkg/api/networking/v1alpha1"
+	"github.com/SchSeba/dra-multi-network/pkg/ipam"
 	"github.com/SchSeba/dra-multi-network/pkg/topology"
 )
 
@@ -78,6 +79,25 @@ func (a *Agent) capabilityReport(ctx context.Context) (topology.NodeCapabilities
 			Exposure  api.Exposure
 		}{a.node.Status.NodeInfo.KernelVersion, persona.Inventory, *persona.Policy.Spec.Exposure})}
 		profiles[profile] = true
+	}
+	if a.ipamHelper != nil && a.ipamHelper.RegistrationStatus() != nil && a.ipamHelper.RegistrationStatus().PluginRegistered {
+		var currentNode corev1.Node
+		if err := a.client.Get(ctx, client.ObjectKey{Name: a.node.Name}, &currentNode); err != nil {
+			return report, err
+		}
+		pools, err := (ipam.Store{Client: a.client, Namespace: a.config.Flags.Namespace}).Pools(ctx)
+		if err != nil {
+			return report, err
+		}
+		for _, pool := range pools {
+			eligible := pool.Object.DeletionTimestamp.IsZero()
+			for key, value := range pool.Config.NodeSelector {
+				eligible = eligible && currentNode.Labels[key] == value
+			}
+			if eligible {
+				profiles[topology.HardwareProfile{Contract: topology.ProfileContractDigest(topology.PluginRegistry(nil)[topology.IPAMPlugin].Spec), Hardware: topology.Digest(pool.Config)}] = true
+			}
+		}
 	}
 	for profile := range profiles {
 		report.Profiles = append(report.Profiles, profile)

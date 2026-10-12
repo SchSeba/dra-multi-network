@@ -100,7 +100,8 @@ it is not per-container network namespace isolation. Changing link state or
 assigning IPs inside the Pod requires `NET_ADMIN`; ping may require `NET_RAW`.
 The starter Pod includes these capabilities only for experimentation.
 
-The POC configures links/topology and does not include IPAM, routes, DNS or
+The optional [IPAM example](../../examples/ipam/README.md) adds IPv4 addresses
+from a scheduler-accounted subnet. The POC does not include new default routes, DNS or
 NetworkPolicy enforcement for secondary interfaces. For an isolated lab:
 
 ```bash

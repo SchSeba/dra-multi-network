@@ -192,9 +192,13 @@ func Builtins() []api.NetworkPlugin {
 	result = append(result, resetProfiles()...)
 	result = append(result, roceProfiles()...)
 	result = append(result, switchdevProfiles(result)...)
-	return append(result, ibProfiles()...)
+	result = append(result, ibProfiles()...)
+	return append(result, ipamPlugins()...)
 }
 func ValidatePlugin(p api.NetworkPlugin) error {
+	if p.Spec.AllocationDriver != "" && (p.Spec.Implementation.Type != BuiltinImplementation || p.Name != IPAMPlugin) {
+		return fmt.Errorf("E_ALLOCATION_DRIVER: only certified IPAM may delegate allocation")
+	}
 	if p.Spec.StateContract != (api.StateContract{Version: ContractVersion, Cleanup: RecordedEffects}) {
 		return fmt.Errorf("E_STATE_CONTRACT: unsupported cleanup contract")
 	}
@@ -314,6 +318,11 @@ func Compile(t api.NetworkTopology, plugins map[string]api.NetworkPlugin) (api.R
 			}
 			names[c.IfName] = step.ID
 		}
+		if p.Spec.AllocationDriver == IPAMDriver {
+			if err := ValidateIPAMConfig(c); err != nil {
+				return r, err
+			}
+		}
 		configs[step.ID] = c
 		if step.Kind == AllocationKind {
 			rootCount++
@@ -347,6 +356,7 @@ func Compile(t api.NetworkTopology, plugins map[string]api.NetworkPlugin) (api.R
 	state := map[string]int{}
 	masters := map[string]string{}
 	vlanParents := map[string]string{}
+	leaseUsers := map[string]string{}
 	tags := map[string]bool{}
 	var visit func(string) error
 	visit = func(id string) error {
@@ -388,6 +398,12 @@ func Compile(t api.NetworkTopology, plugins map[string]api.NetworkPlugin) (api.R
 				if err := visit(from); err != nil {
 					return err
 				}
+				if port.Type == AddressLeaseType {
+					if leaseUsers[ref.From] != "" {
+						return fmt.Errorf("E_LEASE_DUPLICATE: %s", ref.From)
+					}
+					leaseUsers[ref.From] = id
+				}
 				if port.Access == AccessExclusiveMaster {
 					if port.Type == RepresentorType && producer.Kind != AllocationKind {
 						return fmt.Errorf("E_MULTIPLE_MASTERS: representor master chains are not permitted")
@@ -408,7 +424,7 @@ func Compile(t api.NetworkTopology, plugins map[string]api.NetworkPlugin) (api.R
 					if !configs[from].Up {
 						return fmt.Errorf("E_LINK_STATE: bond members must be configured up")
 					}
-				} else {
+				} else if port.Access == AccessCreateChild {
 					if configs[from].VlanID != 0 {
 						return fmt.Errorf("E_VLAN_STACKING: %s", id)
 					}
@@ -432,6 +448,11 @@ func Compile(t api.NetworkTopology, plugins map[string]api.NetworkPlugin) (api.R
 	for _, id := range slices.Sorted(maps.Keys(steps)) {
 		if err := visit(id); err != nil {
 			return r, err
+		}
+	}
+	for _, step := range steps {
+		if plugins[step.PluginRef.Name].Spec.AllocationDriver == IPAMDriver && leaseUsers[step.ID+"."+LeasePort] == "" {
+			return r, fmt.Errorf("E_IPAM_UNUSED_ROOT: %s", step.ID)
 		}
 	}
 	for child, parent := range vlanParents {

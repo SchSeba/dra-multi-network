@@ -154,6 +154,10 @@ spec:
                   properties:
                     ifName:
                       type: string
+                    ips:
+                      items:
+                        type: string
+                      type: array
                     pciAddress:
                       type: string
                     port:

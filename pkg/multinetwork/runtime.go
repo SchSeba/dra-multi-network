@@ -196,6 +196,9 @@ func (a *Agent) RunPodSandbox(ctx context.Context, sandbox *nri.PodSandbox) erro
 			return err
 		}
 	}
+	if err := a.connectIPAM(ctx, *p, &at, func() error { return a.store.Put("attach/"+id, at) }); err != nil {
+		return err
+	}
 	if err := verifyPins(at); err != nil {
 		return err
 	}
@@ -428,7 +431,10 @@ func (a *Agent) restoreAttachment(native *effects.Native, at *Attachment, save f
 		return err
 	}
 	native.UplinkStore = a.store
-	return native.Restore(&at.Execution, save)
+	if err := native.Restore(&at.Execution, save); err != nil {
+		return err
+	}
+	return a.releaseIPAM(*at)
 }
 func releasePins(at Attachment) error {
 	if err := effects.Unpin(at.Pin); err != nil {
@@ -476,6 +482,9 @@ func (a *Agent) Synchronize(ctx context.Context, pods []*nri.PodSandbox, contain
 				if container.PodSandboxId == at.Spec.SandboxID && container.State != nri.ContainerState_CONTAINER_STOPPED {
 					return nil, fmt.Errorf("E_RECOVERY_LIVE_CONTAINER: incomplete attachment")
 				}
+			}
+			if err := a.releaseIPAM(at); err != nil {
+				return nil, err
 			}
 			at.Phase = Removed
 			if err := a.store.Put(key, at); err != nil {
@@ -597,6 +606,9 @@ func (a *Agent) reportStatus(ctx context.Context, key string, at Attachment) err
 	for name, h := range at.Execution.Outputs {
 		step, port, _ := strings.Cut(name, ".")
 		output := api.Output{Step: step, Port: port, Type: h.Type, IfName: h.Name, PCIAddress: h.PCIAddress, ShareID: h.ShareID}
+		if h.Address != "" {
+			output.IPs = []string{h.Address}
+		}
 		if h.Type == topology.RDMAType {
 			output.IfName = ""
 			output.RDMADevice = h.Name

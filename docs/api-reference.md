@@ -133,6 +133,7 @@ opaque native DeviceClass configuration, not a sixth CRD. See
 | `status.lastError` | string | optional |
 | `status.outputs` | array | optional |
 | `status.outputs[]` | object | optional |
+| `status.outputs[].ips` | array of CIDR strings | optional; assigned address observations |
 | `status.outputs[].ifName` | string | optional |
 | `status.outputs[].pciAddress` | string | optional |
 | `status.outputs[].port` | string | required |
@@ -152,6 +153,7 @@ opaque native DeviceClass configuration, not a sixth CRD. See
 | `spec.allocationProfileRef.name` | string | required |
 | `spec.allowedEffects` | array | required |
 | `spec.allowedEffects[]` | string | optional |
+| `spec.allocationDriver` | string | optional; only the certified IPAM builtin may set `ipam.schseba.github.io`; omission uses the network driver |
 | `spec.configSchema` | JSON | required; preserved JSON; framework validates contract |
 | `spec.hooks` | object | preserved JSON; framework validates contract |
 | `spec.implementation` | object | required |
@@ -234,6 +236,7 @@ opaque native DeviceClass configuration, not a sixth CRD. See
 | `spec.plugins[].spec.allocationProfileRef.name` | string | required |
 | `spec.plugins[].spec.allowedEffects` | array | required |
 | `spec.plugins[].spec.allowedEffects[]` | string | optional |
+| `spec.plugins[].spec.allocationDriver` | string | optional; locked allocating-driver contract |
 | `spec.plugins[].spec.configSchema` | JSON | required; preserved JSON; framework validates contract |
 | `spec.plugins[].spec.hooks` | object | preserved JSON; framework validates contract |
 | `spec.plugins[].spec.implementation` | object | required |
@@ -896,3 +899,17 @@ are in [effect-program](../examples/effect-program/plugin.yaml),
 [root-effect-program](../examples/root-effect-program/plugin.yaml).
 See [NetworkPlugin configuration](admin/networkplugins.md) and the
 [SDK](../pkg/pluginapi/README.md) for lifecycle and framework boundaries.
+
+## IPAM and address profiles
+
+`ipam` is an Allocation plugin with config `{network, subnet}` and output
+`lease: AddressLease/v2`. It has no Linux effects and sets `allocationDriver` to
+`ipam.schseba.github.io`. Each claim request must consume exactly one
+`ipam.schseba.github.io/addresses` unit from a shared subnet device.
+
+`address-cni` is an Operation with empty config, scalar inputs
+`interface: KernelInterface/v1` (Ethernet) and `lease: AddressLease/v2`, and
+output `configured: KernelInterface/v1`. Its effect is
+`linux/address-configure/v1`, requiring a private sandbox interface and the
+framework's granted lease. Each lease may have one address consumer in a topology.
+The [IPAM design](ipam-plan.md) documents pool configuration and backend limits.

@@ -22,5 +22,10 @@ GA architecture work:
   the POC has been reviewed. The POC does not promise production recovery coverage.
 
 Tests that launch containerd/CRI-O binaries remain outside the requested suite.
-There is no IPAM implementation in this POC; application/fabric addressing stays
-an explicit operator/user step.
+The POC includes an IPv4 IPAM demo with scheduler-visible subnet capacity and
+durable claim/attachment leases. DHCP, DNS, dual-stack, retained workload
+identities, migration and production-scale ledger storage remain deferred.
+
+The addressing implementation is described in [IPAM with DRA subnet capacity](ipam-plan.md):
+one claim requests interface and IPAM classes, with scheduler-visible subnet
+capacity and durable backend address/attachment ownership.

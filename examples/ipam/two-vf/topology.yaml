@@ -1,0 +1,73 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata:
+  name: two-vf-ipam
+spec:
+  effectBudget:
+    allow:
+    - linux/link-move/v1
+    - linux/link-configure/v1
+    - linux/address-configure/v1
+  steps:
+  - id: vf0
+    kind: Allocation
+    pluginRef:
+      name: sriov-cni
+    selectors:
+    - device.attributes["dra-multi-network.schseba.github.io"].pfPciAddress == "0000:29:00.0"
+    - device.attributes["dra-multi-network.schseba.github.io"].persona == "ipam-vf"
+    config:
+      mode: kernel
+      linkType: ethernet
+      rdmaAccess: false
+      ifName: secondary0
+      mtu: 1500
+      up: true
+  - id: address0
+    kind: Allocation
+    pluginRef:
+      name: ipam
+    config:
+      network: blue
+      subnet: 192.0.2.0/29
+  - id: configure0
+    kind: Operation
+    pluginRef:
+      name: address-cni
+    inputs:
+      interface:
+        from: vf0.interface
+      lease:
+        from: address0.lease
+    config: {}
+  - id: vf1
+    kind: Allocation
+    pluginRef:
+      name: sriov-cni
+    selectors:
+    - device.attributes["dra-multi-network.schseba.github.io"].pfPciAddress == "0000:29:00.0"
+    - device.attributes["dra-multi-network.schseba.github.io"].persona == "ipam-vf"
+    config:
+      mode: kernel
+      linkType: ethernet
+      rdmaAccess: false
+      ifName: secondary1
+      mtu: 1500
+      up: true
+  - id: address1
+    kind: Allocation
+    pluginRef:
+      name: ipam
+    config:
+      network: blue
+      subnet: 192.0.2.0/29
+  - id: configure1
+    kind: Operation
+    pluginRef:
+      name: address-cni
+    inputs:
+      interface:
+        from: vf1.interface
+      lease:
+        from: address1.lease
+    config: {}

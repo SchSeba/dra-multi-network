@@ -31,6 +31,8 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	api "github.com/SchSeba/dra-multi-network/pkg/api/networking/v1alpha1"
 	"github.com/SchSeba/dra-multi-network/pkg/multinetwork"
 	"github.com/SchSeba/dra-multi-network/pkg/topology"
@@ -261,6 +263,8 @@ func (s *Server) validate(ctx context.Context, req *admissionv1.AdmissionRequest
 				}
 			}
 		}
+	case "ConfigMap":
+		return s.ipamConfigMap(ctx, req)
 	case "ResourceClaim", "ResourceClaimTemplate":
 		if req.Operation == admissionv1.Delete || req.SubResource != "" {
 			return nil
@@ -398,7 +402,7 @@ func (s *Server) claimRevision(ctx context.Context, spec resourceapi.ResourceCla
 		return nil, nil
 	}
 	for _, config := range spec.Devices.Config {
-		if config.Opaque != nil && config.Opaque.Driver == api.Driver {
+		if config.Opaque != nil && (config.Opaque.Driver == api.Driver || config.Opaque.Driver == topology.IPAMDriver) {
 			return nil, fmt.Errorf("E_BINDING_ORIGIN: claim configuration cannot override topology")
 		}
 	}
@@ -437,6 +441,23 @@ func (s *Server) claimRevision(ctx context.Context, spec resourceapi.ResourceCla
 			}
 		} else if ref != binding.RevisionRef {
 			return nil, fmt.Errorf("E_REVISION_MIXED")
+		}
+
+		for _, step := range revision.Spec.Topology.Steps {
+			if step.ID != binding.RootStep {
+				continue
+			}
+			for _, plugin := range revision.Spec.Plugins {
+				if plugin.Name == step.PluginRef.Name && plugin.Spec.AllocationDriver == topology.IPAMDriver {
+					if request.Exactly.Capacity == nil || len(request.Exactly.Capacity.Requests) != 1 {
+						return nil, fmt.Errorf("E_IPAM_CAPACITY: request exactly one address")
+					}
+					q := request.Exactly.Capacity.Requests[resourceapi.QualifiedName(topology.AddressCapacity)]
+					if q.Cmp(resource.MustParse("1")) != 0 {
+						return nil, fmt.Errorf("E_IPAM_CAPACITY: request exactly one address")
+					}
+				}
+			}
 		}
 	}
 	roots := 0

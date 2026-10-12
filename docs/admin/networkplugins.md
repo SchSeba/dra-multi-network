@@ -63,7 +63,7 @@ Cleanup does not accept new arbitrary deletion targets. It identifies the
 original framework execution and hook. The framework checks the saved contract,
 allocation identity, live state and journal before restoring before-images.
 
-All eight families use the [serializable plugin SDK](../../pkg/pluginapi/README.md).
+All plugin families use the [serializable plugin SDK](../../pkg/pluginapi/README.md).
 Only the DRA framework discovers devices, publishes slices, authorizes effects,
 executes Linux/OVS changes and writes state. GA will replace internal calls with
 gRPC for every implementation; no plugin gains Kubernetes or journal authority.
@@ -109,3 +109,9 @@ Deleting a custom plugin stops new consumers of its locked revisions. Existing
 claims retain the exact cleanup contract. Retention finalizers wait for cluster
 and node ownership to drain; do not remove them to force deletion. See
 [operations](../operations.md).
+
+The certified `ipam` Allocation descriptor delegates allocation to
+`ipam.schseba.github.io` and exports an opaque `AddressLease/v2`. The
+`address-cni` Operation consumes that lease and a kernel interface, then plans
+`linux/address-configure/v1`. The backend runs in the framework processes;
+planners still receive no Kubernetes clients. See the [IPAM example](../../examples/ipam/README.md).

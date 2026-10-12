@@ -11,12 +11,15 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	"github.com/SchSeba/dra-multi-network/pkg/ipam"
 
 	"github.com/SchSeba/dra-multi-network/pkg/admission"
 	api "github.com/SchSeba/dra-multi-network/pkg/api/networking/v1alpha1"
@@ -61,6 +64,13 @@ func run() error {
 		return err
 	}
 	if err := (&controller.CapabilityReconciler{Client: mgr.GetClient(), Namespace: namespace}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	ipamClient, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return err
+	}
+	if err := mgr.Add(&ipam.Publisher{Store: ipam.Store{Client: c, Namespace: namespace}, KubeClient: ipamClient}); err != nil {
 		return err
 	}
 	ready := make(chan struct{})

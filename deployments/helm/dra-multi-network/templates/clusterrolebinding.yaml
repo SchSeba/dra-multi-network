@@ -12,3 +12,28 @@ roleRef:
   kind: ClusterRole
   name: {{ include "dra-multi-network.fullname" . }}-role
   apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dra-multi-network-ipam-node
+  namespace: {{ include "dra-multi-network.namespace" . }}
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dra-multi-network-ipam-node
+  namespace: {{ include "dra-multi-network.namespace" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dra-multi-network-ipam-node
+subjects:
+- kind: ServiceAccount
+  name: {{ include "dra-multi-network.serviceAccountName" . }}
+  namespace: {{ include "dra-multi-network.namespace" . }}

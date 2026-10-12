@@ -116,7 +116,9 @@ type AllocationProfileRef struct {
 	Digest string `json:"digest"`
 }
 type PluginSpec struct {
-	Implementation Implementation `json:"implementation"`
+	// AllocationDriver is set only by the certified IPAM allocation contract.
+	AllocationDriver string         `json:"allocationDriver,omitempty"`
+	Implementation   Implementation `json:"implementation"`
 	// +kubebuilder:validation:Enum=Allocation;Operation
 	Kind string `json:"kind"`
 	// +kubebuilder:pruning:PreserveUnknownFields
@@ -369,13 +371,14 @@ type AttachmentSpec struct {
 	RevisionRef RevisionRef `json:"revisionRef"`
 }
 type Output struct {
-	Step       string `json:"step"`
-	Port       string `json:"port"`
-	Type       string `json:"type"`
-	IfName     string `json:"ifName,omitempty"`
-	PCIAddress string `json:"pciAddress,omitempty"`
-	ShareID    string `json:"shareID,omitempty"`
-	RDMADevice string `json:"rdmaDevice,omitempty"`
+	IPs        []string `json:"ips,omitempty"`
+	Step       string   `json:"step"`
+	Port       string   `json:"port"`
+	Type       string   `json:"type"`
+	IfName     string   `json:"ifName,omitempty"`
+	PCIAddress string   `json:"pciAddress,omitempty"`
+	ShareID    string   `json:"shareID,omitempty"`
+	RDMADevice string   `json:"rdmaDevice,omitempty"`
 }
 type AttachmentStatus struct {
 	Phase     string `json:"phase,omitempty"`
