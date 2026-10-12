@@ -1,0 +1,34 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata: {name: switchdev-ovs}
+spec:
+  effectBudget:
+    allow:
+      - linux/representor-map/v1
+      - linux/link-move/v1
+      - linux/link-configure/v1
+      - linux/create-vlan/v1
+      - ovs/representor-port/v1
+  steps:
+    - id: vf
+      kind: Allocation
+      pluginRef: {name: sriov-cni-switchdev}
+      selectors:
+        - 'device.attributes["dra-multi-network.schseba.github.io"].pciAddress in ["0000:29:10.4", "0000:29:10.6"]'
+        - 'device.attributes["dra-multi-network.schseba.github.io"].persona == "switchdev-ovs"'
+      config: {mode: kernel, linkType: ethernet, rdmaAccess: false, representor: true, ifName: vf0, mtu: 1500, up: true}
+    - id: fabric
+      kind: Operation
+      pluginRef: {name: ovs-cni}
+      inputs: {representor: {from: vf.representor}}
+      config: {bridge: ovsbr0, mtu: 1500, up: true, vlanId: 100, trunk: [200, 300]}
+    - id: tenant200
+      kind: Operation
+      pluginRef: {name: vlan-cni}
+      inputs: {parent: {from: vf.interface}}
+      config: {ifName: tenant200, mtu: 1500, up: true, vlanId: 200}
+    - id: tenant300
+      kind: Operation
+      pluginRef: {name: vlan-cni}
+      inputs: {parent: {from: vf.interface}}
+      config: {ifName: tenant300, mtu: 1500, up: true, vlanId: 300}

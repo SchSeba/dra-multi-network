@@ -1,0 +1,17 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata:
+  name: single-vf-devices
+spec:
+  priority: 100
+  selector:
+    kind: VF
+    parentPCIAddresses: ["0000:29:00.0"]
+  action: Expose
+  exposure:
+    persona: kernel
+    plugin: sriov-cni
+    mode: kernel
+    effectPermissions:
+    - linux/link-move/v1
+    - linux/link-configure/v1

@@ -1,0 +1,17 @@
+name: Deploy virtual cluster
+description: Deploy a kcli Kubernetes lab with dra-multi-network
+inputs:
+  single-node:
+    description: Deploy one node when true
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        deploy_args=()
+        if [[ "${{ inputs.single-node }}" == "true" ]]; then
+          deploy_args+=(--single-node)
+        fi
+        sudo -H -E env "PATH=$PATH" bash hack/deploy-virtual-k8s-cluster.sh "${deploy_args[@]}"

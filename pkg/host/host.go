@@ -1,0 +1,719 @@
+package host
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/jaypipes/ghw"
+	"github.com/k8snetworkplumbingwg/sriovnet"
+	"k8s.io/dynamic-resource-allocation/deviceattribute"
+	"k8s.io/klog/v2"
+
+	"github.com/SchSeba/dra-multi-network/pkg/consts"
+)
+
+const (
+	// from include/uapi/linux/if_arp.h
+	ArphrdEther      = 1
+	ArphrdInfiniband = 32
+
+	ovsSystemMasterName       = "ovs-system"
+	maxMasterLookupDepth      = 16
+	defaultRouteTableCacheTTL = time.Second
+)
+
+var (
+	RootDir = ""
+)
+
+// Helper functions to build paths respecting RootDir
+
+// buildSysPath constructs a path under /sys with RootDir prefix if set
+func buildSysPath(path string) string {
+	if RootDir != "" {
+		return filepath.Join(RootDir, path)
+	}
+	return path
+}
+
+// buildSysBusPciPath constructs a PCI device path under /sys/bus/pci/devices
+func buildSysBusPciPath(pciAddress, subPath string) string {
+	basePath := filepath.Join(consts.SysBusPci, pciAddress)
+	if subPath != "" {
+		basePath = filepath.Join(basePath, subPath)
+	}
+	return buildSysPath(basePath)
+}
+
+// buildProcPath constructs a path under /proc with RootDir prefix if set
+func buildProcPath(path string) string {
+	if RootDir != "" {
+		return filepath.Join(RootDir, path)
+	}
+	return path
+}
+
+// VFInfo holds information about a Virtual Function
+type VFInfo struct {
+	PciAddress string
+	VFID       int
+	DeviceID   string
+}
+
+// Interface defines the unified interface for all host system operations.
+// This interface allows for easy mocking in unit tests by implementing mock versions
+// of all the host-related methods.
+//
+//go:generate mockgen -destination mock/mock_host.go -source host.go
+type Interface interface {
+	// SR-IOV device utility functions
+	IsSriovVF(pciAddress string) bool
+	IsSriovPF(pciAddress string) bool
+	GetVFList(pfPciAddress string) ([]VFInfo, error)
+
+	// PCI device discovery functionality
+	PCI() (*ghw.PCIInfo, error)
+
+	// Network interface functions
+	TryGetPFInterfaceName(pciAddr string) string
+	TryGetInterfaceName(pciAddr string) string
+	HasDefaultRoute(pciAddr string) (bool, error)
+	HasBridgeMaster(pciAddr string) (bool, error)
+	GetNicSriovMode(pciAddr string) string
+	GetLinkType(pciAddr string) (string, error)
+
+	// Topology functions
+	GetNumaNode(pciAddress string) (string, error)
+	GetPCIeRoot(pciAddress string) (string, error)
+
+	// RDMA device functions
+	GetRDMADevicesForPCI(pciAddr string) []string
+	VerifyRDMACapability(pciAddr string) bool
+}
+
+// Host provides unified host system functionality for SR-IOV, PCI operations, and driver management
+type Host struct {
+	log               klog.Logger
+	rdmaProvider      RdmaProvider
+	netlinkProvider   NetlinkProvider
+	sriovnetProvider  SriovnetProvider
+	routeCacheMu      sync.Mutex
+	ipv4RouteCacheAt  time.Time
+	ipv4RouteCache    []ipv4DefaultRouteEntry
+	hasIPv4RouteCache bool
+	ipv6RouteCacheAt  time.Time
+	ipv6RouteCache    []ipv6DefaultRouteEntry
+	hasIPv6RouteCache bool
+}
+
+type ipv4DefaultRouteEntry struct {
+	ifaceName string
+}
+
+type ipv6DefaultRouteEntry struct {
+	ifaceName string
+}
+
+// NewHost creates a new Host instance
+func NewHost() Interface {
+	return &Host{
+		log:              klog.FromContext(context.Background()).WithName("Host"),
+		rdmaProvider:     newRdmaProvider(),
+		netlinkProvider:  &defaultNetlinkProvider{},
+		sriovnetProvider: &defaultSriovnetProvider{},
+	}
+}
+
+// Global Helpers instance for use throughout the application
+var (
+	Helpers     Interface
+	helpersOnce sync.Once
+)
+
+// initHelpers initializes the global Helpers instance
+func initHelpers() {
+	helpersOnce.Do(func() {
+		Helpers = NewHost()
+	})
+}
+
+// GetHelpers returns the global Helpers instance, initializing it if necessary
+func GetHelpers() Interface {
+	initHelpers()
+	return Helpers
+}
+
+// SetRdmaProvider sets the RDMA provider for a Host instance
+// This is primarily used for injecting mock providers in unit tests
+func (h *Host) SetRdmaProvider(provider RdmaProvider) {
+	h.rdmaProvider = provider
+}
+
+// SR-IOV Detection Functions
+
+// IsSriovVF checks if a PCI device is an SR-IOV Virtual Function
+func (h *Host) IsSriovVF(pciAddress string) bool {
+	// Check if physfn symlink exists - this indicates it's a VF
+	physfnPath := buildSysBusPciPath(pciAddress, "physfn")
+	if _, err := os.Lstat(physfnPath); err == nil {
+		return true
+	}
+	return false
+}
+
+// IsSriovPF checks if a PCI device is an SR-IOV Physical Function
+func (h *Host) IsSriovPF(pciAddress string) bool {
+	// The capability remains when sriov_numvfs is zero. virtfn0 describes an
+	// enabled child, so using it changes a PF into a generic PCI device on drain.
+	_, err := os.Stat(buildSysBusPciPath(pciAddress, "sriov_totalvfs"))
+	return err == nil
+}
+
+// GetVFList returns list of VFs for a given PF with their VF IDs and device IDs
+func (h *Host) GetVFList(pfPciAddress string) ([]VFInfo, error) {
+	var vfList []VFInfo
+
+	pfPath := buildSysBusPciPath(pfPciAddress, "")
+	entries, err := os.ReadDir(pfPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read PF directory: %v", err)
+	}
+
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "virtfn") {
+			linkPath := filepath.Join(pfPath, entry.Name())
+			target, err := os.Readlink(linkPath)
+			if err != nil {
+				continue
+			}
+
+			// Extract VF ID from directory name (virtfn0 -> 0, virtfn1 -> 1, etc.)
+			vfIDStr := strings.TrimPrefix(entry.Name(), "virtfn")
+			vfID, err := strconv.Atoi(vfIDStr)
+			if err != nil {
+				klog.Error(err, "Failed to parse VF ID", "entry", entry.Name(), "pfAddress", pfPciAddress)
+				continue
+			}
+
+			// Extract PCI address from symlink target
+			vfAddr := filepath.Base(target)
+
+			// Read VF device ID from sysfs
+			deviceIDPath := buildSysBusPciPath(vfAddr, "device")
+			deviceIDBytes, err := os.ReadFile(deviceIDPath) /* #nosec G304 */
+			vfDeviceID := ""
+			if err != nil {
+				klog.Error(err, "Failed to read VF device ID", "vfAddress", vfAddr, "pfAddress", pfPciAddress)
+			} else {
+				vfDeviceID = strings.TrimSpace(string(deviceIDBytes))
+				// Remove 0x prefix if present
+				vfDeviceID = strings.TrimPrefix(vfDeviceID, "0x")
+			}
+
+			vfList = append(vfList, VFInfo{
+				PciAddress: vfAddr,
+				VFID:       vfID,
+				DeviceID:   vfDeviceID,
+			})
+		}
+	}
+
+	return vfList, nil
+}
+
+// PCI Hardware Discovery Functions
+
+// PCI returns PCI information using the public ghw library
+func (h *Host) PCI() (*ghw.PCIInfo, error) {
+	return ghw.PCI()
+}
+
+// TryGetPFInterfaceName returns the PF uplink netdev name for the given PCI
+// address. It uses sriovnet.GetUplinkRepresentor (devlink-based, works for both
+// legacy and switchdev), falling back to a plain sysfs scan for drivers that do
+// not implement devlink. Returns "" on failure.
+// Must not be called with a VF PCI address.
+func (h *Host) TryGetPFInterfaceName(pciAddr string) string {
+	name, err := h.sriovnetProvider.GetUplinkRepresentor(pciAddr)
+	if err == nil {
+		return name
+	}
+
+	if !errors.Is(err, sriovnet.ErrRepresentorNotFound) {
+		h.log.V(4).Info("failed to get PF interface name", "pciAddr", pciAddr, "err", err)
+		return ""
+	}
+
+	// Driver does not implement devlink — fall back to simple sysfs lookup.
+	netDir := buildSysBusPciPath(pciAddr, "net")
+	if _, err := os.Lstat(netDir); err != nil {
+		return ""
+	}
+	fInfos, err := os.ReadDir(netDir)
+	if err != nil {
+		h.log.Error(err, "failed to read net directory", "pciAddr", pciAddr, "path", netDir)
+		return ""
+	}
+	if len(fInfos) == 0 {
+		return ""
+	}
+	return fInfos[0].Name()
+}
+
+// TryGetInterfaceName tries to find the network interface name based on PCI address.
+func (h *Host) TryGetInterfaceName(pciAddr string) string {
+	interfaceNames, err := h.getInterfaceNames(pciAddr)
+	if err != nil {
+		h.log.Error(err, "failed to read net directory", "pciAddr", pciAddr, "path", buildSysBusPciPath(pciAddr, "net"))
+		return ""
+	}
+	if len(interfaceNames) == 0 {
+		return ""
+	}
+	return interfaceNames[0]
+}
+
+// HasDefaultRoute checks whether any interface of the PCI device has an IPv4 or IPv6 default route.
+func (h *Host) HasDefaultRoute(pciAddr string) (bool, error) {
+	interfaceNames, err := h.getInterfaceNames(pciAddr)
+	if err != nil {
+		return false, fmt.Errorf("failed to get interfaces for PCI address %s: %w", pciAddr, err)
+	}
+	if len(interfaceNames) == 0 {
+		return false, nil
+	}
+
+	routeLookupInterfaces := h.routeLookupInterfaces(interfaceNames)
+
+	hasIPv4DefaultRoute, err := h.hasDefaultRouteInIPv4Table(routeLookupInterfaces)
+	if err != nil {
+		return false, err
+	}
+	if hasIPv4DefaultRoute {
+		return true, nil
+	}
+
+	hasIPv6DefaultRoute, err := h.hasDefaultRouteInIPv6Table(routeLookupInterfaces)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return hasIPv6DefaultRoute, nil
+}
+
+// hasDefaultRouteInIPv4Table checks /proc/net/route for IPv4 default routes on target interfaces.
+func (h *Host) hasDefaultRouteInIPv4Table(interfaceNames []string) (bool, error) {
+	routes, err := h.getIPv4DefaultRoutes()
+	if err != nil {
+		return false, err
+	}
+	for _, route := range routes {
+		if routeBelongsToInterface(interfaceNames, route.ifaceName) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// hasDefaultRouteInIPv6Table checks /proc/net/ipv6_route for IPv6 default routes on target interfaces.
+func (h *Host) hasDefaultRouteInIPv6Table(interfaceNames []string) (bool, error) {
+	routes, err := h.getIPv6DefaultRoutes()
+	if err != nil {
+		return false, err
+	}
+	for _, route := range routes {
+		if routeBelongsToInterface(interfaceNames, route.ifaceName) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// getIPv4DefaultRoutes returns a short-lived cached snapshot of IPv4 default-route interfaces.
+func (h *Host) getIPv4DefaultRoutes() ([]ipv4DefaultRouteEntry, error) {
+	h.routeCacheMu.Lock()
+	if h.hasIPv4RouteCache && time.Since(h.ipv4RouteCacheAt) < defaultRouteTableCacheTTL {
+		cached := append([]ipv4DefaultRouteEntry(nil), h.ipv4RouteCache...)
+		h.routeCacheMu.Unlock()
+		return cached, nil
+	}
+	h.routeCacheMu.Unlock()
+
+	routeTablePath := buildProcPath("/proc/net/route")
+	routeTableContent, err := os.ReadFile(routeTablePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read route table: %w", err)
+	}
+
+	routes := parseIPv4DefaultRoutes(routeTableContent)
+	h.routeCacheMu.Lock()
+	h.ipv4RouteCacheAt = time.Now()
+	h.ipv4RouteCache = append([]ipv4DefaultRouteEntry(nil), routes...)
+	h.hasIPv4RouteCache = true
+	h.routeCacheMu.Unlock()
+	return routes, nil
+}
+
+// getIPv6DefaultRoutes returns a short-lived cached snapshot of IPv6 default-route interfaces.
+func (h *Host) getIPv6DefaultRoutes() ([]ipv6DefaultRouteEntry, error) {
+	h.routeCacheMu.Lock()
+	if h.hasIPv6RouteCache && time.Since(h.ipv6RouteCacheAt) < defaultRouteTableCacheTTL {
+		cached := append([]ipv6DefaultRouteEntry(nil), h.ipv6RouteCache...)
+		h.routeCacheMu.Unlock()
+		return cached, nil
+	}
+	h.routeCacheMu.Unlock()
+
+	routeTablePath := buildProcPath("/proc/net/ipv6_route")
+	routeTableContent, err := os.ReadFile(routeTablePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read IPv6 route table: %w", err)
+	}
+
+	routes := parseIPv6DefaultRoutes(routeTableContent)
+	h.routeCacheMu.Lock()
+	h.ipv6RouteCacheAt = time.Now()
+	h.ipv6RouteCache = append([]ipv6DefaultRouteEntry(nil), routes...)
+	h.hasIPv6RouteCache = true
+	h.routeCacheMu.Unlock()
+	return routes, nil
+}
+
+// parseIPv4DefaultRoutes extracts default-route interfaces from /proc/net/route contents.
+func parseIPv4DefaultRoutes(routeTableContent []byte) []ipv4DefaultRouteEntry {
+	lines := strings.Split(string(routeTableContent), "\n")
+	routes := make([]ipv4DefaultRouteEntry, 0)
+	for index, line := range lines {
+		// Skip header line and empty rows.
+		if index == 0 || strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		// /proc/net/route has at least iface, destination and mask columns.
+		if len(fields) < 8 {
+			continue
+		}
+		ifaceName := fields[0]
+		destination := fields[1]
+		mask := fields[7]
+		if destination != "00000000" || mask != "00000000" {
+			continue
+		}
+		routes = append(routes, ipv4DefaultRouteEntry{ifaceName: ifaceName})
+	}
+	return routes
+}
+
+// parseIPv6DefaultRoutes extracts default-route interfaces from /proc/net/ipv6_route contents.
+func parseIPv6DefaultRoutes(routeTableContent []byte) []ipv6DefaultRouteEntry {
+	const zeroIPv6Address = "00000000000000000000000000000000"
+
+	lines := strings.Split(string(routeTableContent), "\n")
+	routes := make([]ipv6DefaultRouteEntry, 0)
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		// /proc/net/ipv6_route fields include destination, destination prefix, and interface name.
+		if len(fields) < 10 {
+			continue
+		}
+		destination := fields[0]
+		destinationPrefixLen := fields[1]
+		if destination != zeroIPv6Address || destinationPrefixLen != "00" {
+			continue
+		}
+		ifaceName := fields[len(fields)-1]
+		routes = append(routes, ipv6DefaultRouteEntry{ifaceName: ifaceName})
+	}
+	return routes
+}
+
+// routeBelongsToInterface checks whether a route interface matches a target interface name.
+func routeBelongsToInterface(interfaceNames []string, routeIfaceName string) bool {
+	for _, interfaceName := range interfaceNames {
+		// Consider direct interface routes and common derived names (for example VLAN subinterfaces).
+		if routeIfaceName == interfaceName ||
+			strings.HasPrefix(routeIfaceName, interfaceName+".") ||
+			strings.HasPrefix(routeIfaceName, interfaceName+":") {
+			return true
+		}
+	}
+	return false
+}
+
+// routeLookupInterfaces expands base interfaces with their master chain for route ownership checks.
+func (h *Host) routeLookupInterfaces(interfaceNames []string) []string {
+	lookupSet := make(map[string]struct{}, len(interfaceNames))
+	for _, interfaceName := range interfaceNames {
+		current := interfaceName
+		for depth := 0; depth < maxMasterLookupDepth; depth++ {
+			if _, exists := lookupSet[current]; exists {
+				break
+			}
+			lookupSet[current] = struct{}{}
+
+			masterName, hasMaster, err := h.getMasterName(current)
+			if err != nil || !hasMaster {
+				break
+			}
+			current = masterName
+		}
+	}
+
+	lookupInterfaces := make([]string, 0, len(lookupSet))
+	for name := range lookupSet {
+		lookupInterfaces = append(lookupInterfaces, name)
+	}
+	return lookupInterfaces
+}
+
+// HasBridgeMaster checks whether any interface of the PCI device is enslaved to a Linux or OVS bridge.
+func (h *Host) HasBridgeMaster(pciAddr string) (bool, error) {
+	interfaceNames, err := h.getInterfaceNames(pciAddr)
+	if err != nil {
+		return false, fmt.Errorf("failed to get interfaces for PCI address %s: %w", pciAddr, err)
+	}
+	if len(interfaceNames) == 0 {
+		return false, nil
+	}
+
+	var lookupErrs []error
+	for _, interfaceName := range interfaceNames {
+		isBridgeMaster, masterErr := h.interfaceHasBridgeMaster(interfaceName)
+		if masterErr != nil {
+			lookupErrs = append(lookupErrs, masterErr)
+			continue
+		}
+		if isBridgeMaster {
+			return true, nil
+		}
+	}
+
+	if len(lookupErrs) > 0 {
+		return false, errors.Join(lookupErrs...)
+	}
+	return false, nil
+}
+
+// interfaceHasBridgeMaster follows the interface master chain and reports whether any master is a bridge.
+func (h *Host) interfaceHasBridgeMaster(interfaceName string) (bool, error) {
+	visited := map[string]struct{}{}
+	current := interfaceName
+	for depth := 0; depth < maxMasterLookupDepth; depth++ {
+		if _, alreadyVisited := visited[current]; alreadyVisited {
+			return false, nil
+		}
+		visited[current] = struct{}{}
+
+		masterName, hasMaster, err := h.getMasterName(current)
+		if err != nil {
+			return false, err
+		}
+		if !hasMaster {
+			return false, nil
+		}
+
+		isBridge, err := h.isBridgeInterface(masterName)
+		if err != nil {
+			return false, err
+		}
+		if isBridge {
+			return true, nil
+		}
+		current = masterName
+	}
+
+	return false, nil
+}
+
+// getMasterName resolves the immediate master interface for a network interface.
+func (h *Host) getMasterName(interfaceName string) (string, bool, error) {
+	masterLinkPath := buildSysPath(fmt.Sprintf("/sys/class/net/%s/master", interfaceName))
+	masterTarget, readLinkErr := os.Readlink(masterLinkPath)
+	if readLinkErr != nil {
+		if errors.Is(readLinkErr, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("failed to read master link for interface %s: %w", interfaceName, readLinkErr)
+	}
+
+	masterName := filepath.Base(masterTarget)
+	if masterName == "" || masterName == "." {
+		return "", false, nil
+	}
+	return masterName, true, nil
+}
+
+// isBridgeInterface reports whether the given interface name is a Linux bridge or OVS bridge datapath.
+func (h *Host) isBridgeInterface(interfaceName string) (bool, error) {
+	if interfaceName == ovsSystemMasterName {
+		return true, nil
+	}
+
+	linuxBridgePath := buildSysPath(fmt.Sprintf("/sys/class/net/%s/bridge", interfaceName))
+	if _, statErr := os.Stat(linuxBridgePath); statErr == nil {
+		return true, nil
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return false, fmt.Errorf("failed to inspect bridge state for master interface %s: %w", interfaceName, statErr)
+	}
+
+	ovsBridgePath := buildSysPath(fmt.Sprintf("/sys/class/net/%s/openvswitch", interfaceName))
+	if _, statErr := os.Stat(ovsBridgePath); statErr == nil {
+		return true, nil
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return false, fmt.Errorf("failed to inspect openvswitch state for master interface %s: %w", interfaceName, statErr)
+	}
+
+	return false, nil
+}
+
+// GetNicSriovMode returns the eswitch mode ("legacy" or "switchdev") for the
+// given PF PCI address by querying the kernel via devlink.  If the device does
+// not support devlink or the query fails, "legacy" is returned as a safe
+// fallback – mirroring GetPfEswitchMode in sriov-network-device-plugin.
+func (h *Host) GetNicSriovMode(pciAddr string) string {
+	mode, err := h.netlinkProvider.GetDevLinkDeviceEswitchMode(pciAddr)
+	if err != nil {
+		h.log.V(4).Info("devlink eswitch query not supported, assuming legacy", "pciAddr", pciAddr, "err", err)
+		return consts.EswitchModeLegacy
+	}
+	if mode == "" {
+		h.log.V(4).Info("devlink eswitch mode is empty, assuming legacy", "pciAddr", pciAddr)
+		return consts.EswitchModeLegacy
+	}
+	return mode
+}
+
+// GetLinkType returns the link type for a given network interface
+// Common types: ethernet (type 1), infiniband (type 32)
+func (h *Host) GetLinkType(pciAddr string) (string, error) {
+	// Get the interface name first
+	ifName := h.TryGetPFInterfaceName(pciAddr)
+	if ifName == "" {
+		return "", fmt.Errorf("unable to get interface name for PCI address %s", pciAddr)
+	}
+
+	// Read the type from /sys/class/net/<interface>/type
+	typePath := buildSysPath(fmt.Sprintf("/sys/class/net/%s/type", ifName))
+	content, err := os.ReadFile(typePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read link type for interface %s: %w", ifName, err)
+	}
+
+	typeValue := strings.TrimSpace(string(content))
+	typeInt, err := strconv.Atoi(typeValue)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse link type value %s for interface %s: %w", typeValue, ifName, err)
+	}
+
+	// Map the type value to a human-readable string
+	// Reference: https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/if_arp.h
+	switch typeInt {
+	case ArphrdEther:
+		return consts.LinkTypeEthernet, nil
+	case ArphrdInfiniband:
+		return consts.LinkTypeInfiniband, nil
+	default:
+		// Return "unknown" for unsupported types
+		h.log.V(1).Info("Unsupported link type, defaulting to unknown", "interface", ifName, "type", typeInt)
+		return consts.LinkTypeUnknown, nil
+	}
+}
+
+// getInterfaceNames returns network interface names under a PCI device's sysfs net directory.
+func (h *Host) getInterfaceNames(pciAddr string) ([]string, error) {
+	netDir := buildSysBusPciPath(pciAddr, "net")
+	if _, err := os.Lstat(netDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	fInfos, err := os.ReadDir(netDir)
+	if err != nil {
+		return nil, err
+	}
+
+	interfaceNames := make([]string, 0, len(fInfos))
+	for _, info := range fInfos {
+		interfaceNames = append(interfaceNames, info.Name())
+	}
+	return interfaceNames, nil
+}
+
+// GetNumaNode returns the NUMA node for a given PCI device.
+// On success, error is nil and the string value represent the NUMA node affinity. Note that -1 means "no affinity".
+// On failure, error is not nil and the string value must be ignored
+func (h *Host) GetNumaNode(pciAddress string) (string, error) {
+	numaNodePath := buildSysBusPciPath(pciAddress, "numa_node")
+	content, err := os.ReadFile(numaNodePath) /* #nosec G304 */
+	if err != nil {
+		// If numa_node file doesn't exist, return "-1" to represent "no affinity" as the kernel would
+		if os.IsNotExist(err) {
+			return "-1", nil
+		}
+		return "", fmt.Errorf("failed to read numa_node for %s: %v", pciAddress, err)
+	}
+
+	return strings.TrimSpace(string(content)), nil
+}
+
+// GetPCIeRoot returns the PCIe Root Complex for a given PCI device using the upstream Kubernetes implementation.
+// The PCIe Root Complex is returned in the format "pci<domain>:<bus>" (e.g., "pci0000:00").
+// This is used to identify devices that share the same PCIe Root Complex for resource alignment.
+func (h *Host) GetPCIeRoot(pciAddress string) (string, error) {
+	attr, err := deviceattribute.GetPCIeRootAttributeByPCIBusID(pciAddress)
+	if err != nil {
+		return "", fmt.Errorf("failed to get PCIe root for %s: %w", pciAddress, err)
+	}
+
+	// Extract the string value from the attribute
+	if attr.Value.StringValue != nil {
+		return *attr.Value.StringValue, nil
+	}
+
+	return "", fmt.Errorf("PCIe root attribute for %s has no string value", pciAddress)
+}
+
+func (h *Host) GetRDMADevicesForPCI(pciAddr string) []string {
+	h.log.V(2).Info("GetRDMADevicesForPCI(): getting RDMA devices for PCI address", "device", pciAddr)
+
+	// Use rdmaProvider to get RDMA devices for this PCI address
+	rdmaDevices := h.rdmaProvider.GetRdmaDevicesForPcidev(pciAddr)
+
+	if len(rdmaDevices) > 0 {
+		h.log.Info("GetRDMADevicesForPCI(): found RDMA devices",
+			"pciAddress", pciAddr, "rdmaDevices", rdmaDevices)
+	}
+	return rdmaDevices
+}
+
+// VerifyRDMACapability checks if a device supports RDMA by looking for associated RDMA devices
+func (h *Host) VerifyRDMACapability(pciAddr string) bool {
+	h.log.V(2).Info("VerifyRDMACapability(): checking RDMA capability", "device", pciAddr)
+
+	rdmaDevices := h.GetRDMADevicesForPCI(pciAddr)
+
+	hasRDMA := len(rdmaDevices) > 0
+	h.log.Info("VerifyRDMACapability(): RDMA capability check result",
+		"device", pciAddr, "rdmaCapable", hasRDMA)
+
+	return hasRDMA
+}
+
+// GetRDMACharDevices returns the character device paths for an RDMA device
+// These are the actual device nodes (e.g., /dev/infiniband/uverbs0) that need to be
+// exposed to containers for RDMA functionality

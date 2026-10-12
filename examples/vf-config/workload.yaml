@@ -1,0 +1,38 @@
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata: {name: CLAIM_TEMPLATE, namespace: multi-network-example}
+spec:
+  spec:
+    devices:
+      requests:
+        - name: endpoint
+          exactly: {deviceClassName: ROOT_CLASS, allocationMode: ExactCount, count: 1}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vf-config-mvp
+  namespace: multi-network-example
+  annotations:
+    required-plugins.noderesource.dev: '["dra-multi-network"]'
+spec:
+  terminationGracePeriodSeconds: 1
+  nodeSelector: {dra-multi-network.schseba.github.io/ready: "true"}
+  resourceClaims:
+    - name: network
+      resourceClaimTemplateName: CLAIM_TEMPLATE
+  initContainers:
+    - name: verify-vf
+      image: quay.io/schseba/toolbox:latest
+      command: [sh, -ec]
+      args:
+        - |
+          cat /sys/class/net/secondary0/address
+          test "$(cat /sys/class/net/secondary0/address)" = 02:00:00:00:00:14
+          test "$(cat /sys/class/net/secondary0/mtu)" = 1500
+      resources: {claims: [{name: network}]}
+  containers:
+    - name: app
+      image: quay.io/schseba/toolbox:latest
+      command: [sleep, infinity]
+      resources: {claims: [{name: network}]}

@@ -1,0 +1,15 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata:
+  name: secondary-eswitch-mode
+spec:
+  priority: 70
+  selector:
+    kind: PF
+    pciAddresses: ["0000:29:00.0"]
+  action: ManageEswitch
+  management:
+    profile: ethernet-pf-vfs-v1
+    mode: switchdev
+    allowedModes: [legacy, switchdev]
+    effectPermissions: [linux/eswitch-configure/v1]

@@ -1,0 +1,30 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata: {name: secondary-vfio-container-scope}
+spec:
+  priority: 100
+  selector: {kind: VF, pciAddresses: ["0000:29:10.0", "0000:29:11.0"]}
+  action: Expose
+  exposure:
+    persona: vfio
+    plugin: sriov-cni-vfio
+    mode: vfio
+    allowedDrivers: [igbvf, vfio-pci]
+    effectPermissions: [linux/driver-bind/v1, runtime/device-access/v1]
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata: {name: vfio-container-scope}
+spec:
+  effectBudget: {allow: [linux/driver-bind/v1, runtime/device-access/v1]}
+  steps:
+  - id: left
+    kind: Allocation
+    pluginRef: {name: sriov-cni-vfio}
+    selectors: ['device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:10.0"']
+    config: {mode: vfio, linkType: ethernet, driver: vfio-pci, accessBackend: cdi}
+  - id: right
+    kind: Allocation
+    pluginRef: {name: sriov-cni-vfio}
+    selectors: ['device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:11.0"']
+    config: {mode: vfio, linkType: ethernet, driver: vfio-pci, accessBackend: cdi}

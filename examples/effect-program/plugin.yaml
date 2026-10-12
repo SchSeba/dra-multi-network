@@ -1,0 +1,47 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata: {name: administrator-vlan}
+spec:
+  implementation: {type: EffectProgram, version: v1}
+  kind: Operation
+  configSchema:
+    type: object
+    additionalProperties: false
+    required: [ifName, mtu, up, tag]
+    properties:
+      ifName: {type: string, pattern: '^[A-Za-z0-9_.-]{1,15}$'}
+      mtu: {type: integer, minimum: 576, maximum: 9000}
+      up: {type: boolean}
+      tag: {type: integer, minimum: 1, maximum: 4094}
+  inputs:
+    parent: {type: KernelInterface/v1, linkType: ethernet, minItems: 1, maxItems: 1, access: CreateChild}
+  outputs:
+    interface: {type: KernelInterface/v1, linkType: ethernet, minItems: 1, maxItems: 1, ownership: Created}
+  allowedEffects: [linux/create-vlan/v1, linux/link-configure/v1]
+  stateContract: {version: v1, cleanup: RecordedEffects}
+  hooks:
+    ConnectNetwork:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      effects:
+      - id: create
+        kind: linux/create-vlan/v1
+        inputs: {parent: {from: call.inputs.parent}}
+        parameters: {}
+        parameterBindings:
+          ifName: {from: call.config.ifName}
+          mtu: {from: call.config.mtu}
+          vlanId: {from: call.config.tag}
+        requires: [{kind: allocation-and-owned-inputs}]
+        postconditions: [{kind: native-state-match}]
+        recovery: {strategy: ObserveAndReconcile}
+      - id: configure
+        kind: linux/link-configure/v1
+        inputs: {interface: {from: effects.create.interface}}
+        parameters: {}
+        parameterBindings:
+          mtu: {from: call.config.mtu}
+          up: {from: call.config.up}
+        requires: [{kind: allocation-and-owned-inputs}]
+        postconditions: [{kind: native-state-match}]
+        recovery: {strategy: ObserveAndReconcile}
+      exports: {interface: {from: effects.configure.interface}}

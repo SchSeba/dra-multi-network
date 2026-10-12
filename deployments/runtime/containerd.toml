@@ -1,0 +1,13 @@
+# Import into a containerd v3/v4 configuration. Runtime: 2.4.1-dra-nri1.
+# Stock 2.4.1 fails mandatory-plugin disconnect acceptance; see README.
+# Global enforcement needs operator-owned bootstrap Pod annotations; see README.
+[plugins.'io.containerd.nri.v1.nri']
+  disable = false
+  disable_connections = false
+  socket_path = "/var/run/nri/nri.sock"
+  plugin_request_timeout = "10s"
+
+[plugins.'io.containerd.nri.v1.nri'.default_validator]
+  enable = true
+  required_plugins = ["dra-multi-network"]
+  tolerate_missing_plugins_annotation = "dra-multi-network.schseba.github.io/bootstrap-nri-toleration"

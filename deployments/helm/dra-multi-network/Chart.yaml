@@ -1,0 +1,7 @@
+apiVersion: v2
+name: dra-multi-network
+description: Secondary network topologies through DRA and NRI
+type: application
+version: 0.0.0-dev
+appVersion: "latest"
+kubeVersion: ">=1.37.0-0"

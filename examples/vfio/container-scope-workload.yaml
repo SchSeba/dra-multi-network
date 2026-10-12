@@ -1,0 +1,95 @@
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata: {name: CLAIM_TEMPLATE, namespace: multi-network-example}
+spec:
+  spec:
+    devices:
+      requests:
+      - name: first
+        exactly: {deviceClassName: LEFT_CLASS, allocationMode: ExactCount, count: 1}
+      - name: second
+        exactly: {deviceClassName: RIGHT_CLASS, allocationMode: ExactCount, count: 1}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vfio-container-scope
+  namespace: multi-network-example
+  annotations:
+    required-plugins.noderesource.dev: '["dra-multi-network"]'
+spec:
+  terminationGracePeriodSeconds: 1
+  nodeSelector: {dra-multi-network.schseba.github.io/ready: "true"}
+  resourceClaims:
+  - {name: endpoints, resourceClaimTemplateName: CLAIM_TEMPLATE}
+  initContainers:
+  - name: verify-both
+    image: quay.io/schseba/toolbox:latest
+    command: [python3, -c]
+    args:
+    - |
+      import fcntl, glob, os, struct
+      print('NETNS:', os.readlink('/proc/self/ns/net'), flush=True)
+      groups = sorted(p for p in glob.glob('/dev/vfio/*') if os.path.basename(p).isdigit())
+      assert groups == ['/dev/vfio/26', '/dev/vfio/30'], groups
+      with open('/dev/vfio/vfio', 'r+b', buffering=0) as control:
+        assert fcntl.ioctl(control, (ord(';') << 8) | 100) == 0
+      for path in groups:
+        with open(path, 'r+b', buffering=0) as group:
+          status = bytearray(struct.pack('II', 8, 0))
+          fcntl.ioctl(group, (ord(';') << 8) | 103, status, True)
+          assert struct.unpack('II', status)[1] & 1, status
+      print('PASS: init container requesting the whole claim sees both viable allocated groups')
+    resources: {claims: [{name: endpoints}]}
+  containers:
+  - name: left
+    image: quay.io/schseba/toolbox:latest
+    command: [python3, -c]
+    args:
+    - |
+      import glob, os, time
+      print('NETNS:', os.readlink('/proc/self/ns/net'), flush=True)
+      groups = [p for p in glob.glob('/dev/vfio/*') if os.path.basename(p).isdigit()]
+      assert groups == ['/dev/vfio/26'], groups
+      group = open(groups[0], 'r+b', buffering=0)
+      print('PASS: first request receives only group 26', flush=True)
+      while True: time.sleep(3600)
+    resources: {claims: [{name: endpoints, request: first}]}
+  - name: right
+    image: quay.io/schseba/toolbox:latest
+    command: [python3, -c]
+    args:
+    - |
+      import glob, os, time
+      print('NETNS:', os.readlink('/proc/self/ns/net'), flush=True)
+      groups = [p for p in glob.glob('/dev/vfio/*') if os.path.basename(p).isdigit()]
+      assert groups == ['/dev/vfio/30'], groups
+      group = open(groups[0], 'r+b', buffering=0)
+      print('PASS: second request receives only group 30', flush=True)
+      while True: time.sleep(3600)
+    resources: {claims: [{name: endpoints, request: second}]}
+  - name: observer
+    image: quay.io/schseba/toolbox:latest
+    securityContext: {capabilities: {add: [MKNOD]}}
+    command: [python3, -c]
+    args:
+    - |
+      import errno, glob, os, stat, time
+      print('NETNS:', os.readlink('/proc/self/ns/net'), flush=True)
+      assert not glob.glob('/dev/vfio/*'), glob.glob('/dev/vfio/*')
+      for group in ('26', '30'):
+        major, minor = map(int, open('/sys/class/vfio/' + group + '/dev').read().strip().split(':'))
+        path = '/tmp/unrequested-group-' + group
+        os.mknod(path, stat.S_IFCHR | 0o600, os.makedev(major, minor))
+        try:
+          try:
+            fd = os.open(path, os.O_RDWR)
+          except OSError as error:
+            assert error.errno in (errno.EPERM, errno.EACCES), error
+          else:
+            os.close(fd)
+            raise AssertionError('Unrequested group was accessible')
+        finally:
+          os.unlink(path)
+      print('PASS: non-consuming sidecar has no VFIO nodes and cannot open either group through a new device node', flush=True)
+      while True: time.sleep(3600)

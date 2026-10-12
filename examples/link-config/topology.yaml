@@ -1,0 +1,17 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata: {name: labeled-vlan}
+spec:
+  effectBudget:
+    allow: [linux/link-move/v1, linux/link-configure/v1, linux/create-vlan/v1]
+  steps:
+  - id: endpoint
+    kind: Allocation
+    pluginRef: {name: sriov-cni}
+    selectors: ['device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:11.0"']
+    config: {mode: kernel, linkType: ethernet, ifName: secondary0, mtu: 1500, up: true, rdmaAccess: false}
+  - id: tenant
+    kind: Operation
+    pluginRef: {name: labeled-vlan}
+    inputs: {parent: {from: endpoint.interface}}
+    config: {ifName: tenant100, mtu: 1500, up: true, tag: 100, mac: '02:42:ac:11:00:02', alias: 'tenant100/app:blue'}

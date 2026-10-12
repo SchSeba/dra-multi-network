@@ -1,0 +1,34 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata:
+  name: switchdev-accelerated-bridge
+spec:
+  effectBudget:
+    allow:
+      - linux/representor-map/v1
+      - linux/link-move/v1
+      - linux/link-configure/v1
+      - linux/representor-bridge/v1
+  steps:
+    - id: vf
+      kind: Allocation
+      pluginRef: {name: sriov-cni-switchdev}
+      config:
+        mode: kernel
+        linkType: ethernet
+        rdmaAccess: false
+        representor: true
+        ifName: vf0
+        mtu: 1500
+        up: true
+    - id: fabric
+      kind: Operation
+      pluginRef: {name: accelerated-bridge-cni}
+      inputs:
+        representor: {from: vf.representor}
+      config:
+        bridge: fabric0
+        mtu: 1500
+        up: true
+        vlanId: 100
+        trunk: [200, 300]

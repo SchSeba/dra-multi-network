@@ -1,0 +1,18 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata:
+  name: secondary-ipoib
+spec:
+  priority: 100
+  selector:
+    kind: PCI
+    pciAddresses: ["IB_PCI"]
+  action: Expose
+  exposure:
+    persona: ipoib
+    plugin: host-cni-ipoib
+    mode: rdma
+    allowedRDMAProfiles: [ib-ipoib-single-port-v1]
+    allowedMADAccess: true
+    allowedDrivers: ["IB_DRIVER"]
+    effectPermissions: [linux/rdma-namespace/v1, runtime/device-access/v1]

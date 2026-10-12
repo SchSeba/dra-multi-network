@@ -1,0 +1,29 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata:
+  name: secondary-switchdev-uplink-vfs
+spec:
+  priority: 200
+  selector:
+    kind: VF
+    parentPCIAddresses: ["0000:29:00.0"]
+  action: Expose
+  exposure:
+    persona: switchdev-uplink
+    plugin: sriov-cni-switchdev
+    mode: kernel
+    effectPermissions:
+      - linux/representor-map/v1
+      - linux/link-move/v1
+      - linux/link-configure/v1
+      - linux/representor-bridge/v1
+      - linux/shared-uplink-vlan/v1
+    allowedHostBridges:
+      - name: fabric0
+        alias: site/fabric0
+        vlans: [100, 200, 300]
+        uplinks:
+          - name: uplink0
+            alias: site/uplink0
+            pciAddress: "0000:2a:00.0"
+            vlans: [100, 200, 300]

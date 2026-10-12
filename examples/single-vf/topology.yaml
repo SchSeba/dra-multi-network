@@ -1,0 +1,12 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata: {name: single-vf}
+spec:
+  effectBudget: {allow: [linux/link-move/v1, linux/link-configure/v1]}
+  steps:
+  - id: endpoint
+    kind: Allocation
+    pluginRef: {name: sriov-cni}
+    selectors:
+    - 'device.attributes["dra-multi-network.schseba.github.io"].pfPciAddress == "0000:29:00.0"'
+    config: {mode: kernel, linkType: ethernet, rdmaAccess: false, ifName: secondary0, mtu: 1500, up: true}

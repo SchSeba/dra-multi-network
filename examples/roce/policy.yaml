@@ -1,0 +1,19 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata:
+  name: secondary-roce
+spec:
+  priority: 100
+  selector:
+    kind: PCI
+    pciAddresses: ["RDMA_PCI"]
+  action: Expose
+  exposure:
+    persona: roce
+    plugin: host-cni-roce
+    mode: rdma
+    allowedRDMAProfiles: [roce-single-port-v1]
+    allowedDrivers: ["RDMA_DRIVER"]
+    effectPermissions:
+      - linux/rdma-namespace/v1
+      - runtime/device-access/v1

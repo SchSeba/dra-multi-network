@@ -1,0 +1,43 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "dra-multi-network.fullname" . }}-role
+  namespace: {{ include "dra-multi-network.namespace" . }}
+rules:
+- apiGroups: ["resource.k8s.io"]
+  resources: ["resourceclaims"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["resource.k8s.io"]
+  resources: ["resourceclaims/status"]
+  verbs: ["get","list","update","patch"]
+- apiGroups: ["resource.k8s.io"]
+  resources: ["resourceclaims/driver"]
+  verbs: ["associated-node:update"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]  # Cluster-scoped resource, needs cluster permissions
+- apiGroups: ["resource.k8s.io"]
+  resources: ["resourceslices"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["networking.dra-multi-network.schseba.github.io"]
+  resources: ["deviceexposurepolicies", "networkplugins", "networktopologies", "networktopologyrevisions"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["networking.dra-multi-network.schseba.github.io"]
+  resources: ["deviceexposurepolicies/status"]
+  verbs: ["get", "patch"]
+- apiGroups: ["networking.dra-multi-network.schseba.github.io"]
+  resources: ["networkattachmentstatuses", "networkattachmentstatuses/status"]
+  verbs: ["get", "list", "create", "update", "patch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["patch"]
+- apiGroups: ["resource.k8s.io"]
+  resources: ["deviceclasses", "resourceclaimtemplates"]
+  verbs: ["get", "list", "watch"]

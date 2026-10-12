@@ -1,0 +1,56 @@
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: CLAIM_TEMPLATE
+  namespace: multi-network-roce-example
+spec:
+  spec:
+    devices:
+      requests:
+        - name: rdma
+          exactly:
+            deviceClassName: ROOT_CLASS
+            count: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: roce-mvp
+  namespace: multi-network-roce-example
+spec:
+  terminationGracePeriodSeconds: 1
+  resourceClaims:
+    - name: secondary
+      resourceClaimTemplateName: CLAIM_TEMPLATE
+  securityContext: {runAsUser: 1000, runAsGroup: 1000, runAsNonRoot: true}
+  initContainers:
+    - name: verify-rdma
+      image: quay.io/schseba/toolbox:latest
+      command: ["/bin/bash", "-ec"]
+      args:
+        - |
+          ip link show roce0
+          set -- /dev/infiniband/uverbs*
+          test "$#" = 1 && test -c "$1"
+          test -c /dev/infiniband/rdma_cm
+          exec 9<>"$1"
+          exec 9>&-
+          exec 8<>/dev/infiniband/rdma_cm
+          exec 8>&-
+      resources:
+        claims: [{name: secondary, request: rdma}]
+  containers:
+    - name: app
+      image: quay.io/schseba/toolbox:latest
+      command: ["sleep", "infinity"]
+      resources:
+        claims: [{name: secondary, request: rdma}]
+    - name: sidecar
+      image: quay.io/schseba/toolbox:latest
+      command: ["/bin/bash", "-ec"]
+      args:
+        - |
+          test ! -e /dev/infiniband/rdma_cm
+          set -- /dev/infiniband/uverbs*
+          test ! -e "$1"
+          exec sleep infinity

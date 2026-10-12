@@ -1,0 +1,6 @@
+.git
+.cache
+.config
+bin
+coverage.out
+*-plan.yaml

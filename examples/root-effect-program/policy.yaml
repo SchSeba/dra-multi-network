@@ -1,0 +1,13 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata: {name: secondary-programmable-vfs}
+spec:
+  priority: 100
+  selector: {kind: VF, parentPCIAddresses: ["0000:29:00.0"]}
+  action: Expose
+  exposure:
+    persona: programmed
+    plugin: programmable-sriov
+    mode: kernel
+    allowedDrivers: [igbvf, vfio-pci]
+    effectPermissions: [linux/driver-bind/v1, linux/link-move/v1, linux/link-configure/v1]

@@ -1,0 +1,25 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata: {name: kernel-reset}
+spec:
+  effectBudget:
+    allow:
+      - linux/pci-reset/v1
+      - linux/driver-bind/v1
+      - linux/link-move/v1
+      - linux/link-configure/v1
+  steps:
+    - id: endpoint
+      kind: Allocation
+      pluginRef: {name: sriov-cni-reset}
+      selectors:
+        - 'device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:11.0"'
+      config:
+        mode: kernel
+        linkType: ethernet
+        rdmaAccess: false
+        driver: igbvf
+        resetMethod: flr
+        ifName: secondary0
+        mtu: 1500
+        up: true

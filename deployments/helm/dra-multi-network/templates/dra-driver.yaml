@@ -1,0 +1,168 @@
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "dra-multi-network.fullname" . }}-kubeletplugin
+  namespace: {{ include "dra-multi-network.namespace" . }}
+  labels:
+    {{- include "dra-multi-network.labels" . | nindent 4 }}
+    app.kubernetes.io/component: kubeletplugin
+spec:
+  selector:
+    matchLabels:
+      {{- include "dra-multi-network.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: kubeletplugin
+  {{- with .Values.kubeletPlugin.updateStrategy }}
+  updateStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  template:
+    metadata:
+      annotations:
+        {{- with omit .Values.kubeletPlugin.podAnnotations "dra-multi-network.schseba.github.io/bootstrap-nri-toleration" }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        dra-multi-network.schseba.github.io/bootstrap-nri-toleration: "true"
+      labels:
+        {{- include "dra-multi-network.templateLabels" . | nindent 8 }}
+        app.kubernetes.io/component: kubeletplugin
+    spec:
+      terminationGracePeriodSeconds: 30
+      hostNetwork: true
+      hostPID: true
+      {{- if .Values.kubeletPlugin.priorityClassName }}
+      priorityClassName: {{ .Values.kubeletPlugin.priorityClassName }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "dra-multi-network.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.kubeletPlugin.podSecurityContext | nindent 8 }}
+      containers:
+      - name: plugin
+        securityContext:
+          {{- toYaml .Values.kubeletPlugin.containers.plugin.securityContext | nindent 10 }}
+        image: {{ include "dra-multi-network.fullimage" . }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        readinessProbe:
+          exec:
+            command: [test, -f, /tmp/dra-multi-network-ready]
+          periodSeconds: 2
+        command:
+          - /usr/bin/dra-multi-network-node
+        resources:
+          {{- toYaml .Values.kubeletPlugin.containers.plugin.resources | nindent 10 }}
+        env:
+        - name: CDI_ROOT
+          value: /var/run/cdi
+        - name: KUBELET_REGISTRAR_DIRECTORY_PATH
+          value: {{ .Values.kubeletPlugin.kubeletRegistrarDirectoryPath | quote }}
+        - name: KUBELET_PLUGINS_DIRECTORY_PATH
+          value: {{ .Values.kubeletPlugin.kubeletPluginsDirectoryPath | quote }}
+        - name: NRI_PLUGIN_NAME
+          value: {{ .Values.kubeletPlugin.nriPluginName | quote }}
+        - name: NRI_PLUGIN_IDX
+          value: {{ .Values.kubeletPlugin.nriPluginIndex | quote }}
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        # Logging configuration
+        {{- if .Values.logging.level }}
+        - name: V
+          value: {{ .Values.logging.level | quote }}
+        {{- end }}
+        {{- if .Values.logging.format }}
+        - name: LOG_FORMAT
+          value: {{ .Values.logging.format | quote }}
+        {{- end }}
+        {{- if .Values.logging.alsologtostderr }}
+        - name: ALSOLOGTOSTDERR
+          value: {{ .Values.logging.alsologtostderr | quote }}
+        {{- end }}
+        {{- if .Values.logging.logFile }}
+        - name: LOG_FILE
+          value: {{ .Values.logging.logFile | quote }}
+        {{- end }}
+        volumeMounts:
+        {{- if .Values.kubeletPlugin.ovs.enabled }}
+        - name: ovsdb
+          mountPath: /var/run/openvswitch
+        {{- end }}
+        - name: network-state
+          mountPath: /var/lib/dra-multi-network
+          mountPropagation: Bidirectional
+        - name: plugins-registry
+          mountPath: {{ .Values.kubeletPlugin.kubeletRegistrarDirectoryPath | quote }}
+        - name: plugins
+          mountPath: {{ .Values.kubeletPlugin.kubeletPluginsDirectoryPath | quote }}
+        - name: cdi
+          mountPath: /var/run/cdi
+        - name: vfio
+          mountPath: /dev/vfio
+        - name: cri-socket
+          mountPath: /var/run/nri/nri.sock
+        - name: netns
+          mountPath: /var/run/netns
+          mountPropagation: HostToContainer
+      volumes:
+      {{- if .Values.kubeletPlugin.ovs.enabled }}
+      - name: ovsdb
+        hostPath:
+          path: /var/run/openvswitch
+          type: Directory
+      {{- end }}
+      - name: network-state
+        hostPath:
+          path: /var/lib/dra-multi-network
+          type: DirectoryOrCreate
+      - name: netns
+        hostPath:
+          path: /var/run/netns
+          type: DirectoryOrCreate
+      - name: cri-socket
+        hostPath:
+          path: /var/run/nri/nri.sock
+          type: Socket
+      - name: plugins-registry
+        hostPath:
+          path: {{ .Values.kubeletPlugin.kubeletRegistrarDirectoryPath | quote }}
+          type: DirectoryOrCreate
+      - name: plugins
+        hostPath:
+          path: {{ .Values.kubeletPlugin.kubeletPluginsDirectoryPath | quote }}
+          type: DirectoryOrCreate
+      - name: cdi
+        hostPath:
+          path: /var/run/cdi
+          type: DirectoryOrCreate
+      - name: vfio
+        hostPath:
+          path: /dev/vfio
+          type: DirectoryOrCreate
+      {{- with .Values.kubeletPlugin.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.kubeletPlugin.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.kubeletPlugin.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

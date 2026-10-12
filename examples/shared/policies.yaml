@@ -1,0 +1,44 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata: {name: secondary-host}
+spec:
+  priority: 100
+  selector: {kind: PF, pciAddresses: ["0000:29:00.0"]}
+  action: Expose
+  exposure:
+    persona: kernel
+    plugin: host-cni
+    mode: kernel
+    effectPermissions: [linux/link-move/v1, linux/link-configure/v1]
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata: {name: secondary-macvlan}
+spec:
+  priority: 100
+  selector: {kind: PF, pciAddresses: ["0000:29:00.0"]}
+  action: Expose
+  exposure:
+    persona: macvlan
+    plugin: macvlan-cni
+    mode: bridge
+    allowMultipleAllocations: true
+    capacity:
+      children: {value: "2", default: "1", validValues: ["1"]}
+    effectPermissions: [linux/create-macvlan/v1, linux/link-configure/v1]
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata: {name: secondary-ipvlan}
+spec:
+  priority: 100
+  selector: {kind: PF, pciAddresses: ["0000:29:00.0"]}
+  action: Expose
+  exposure:
+    persona: ipvlan
+    plugin: ipvlan-cni
+    mode: l2
+    allowMultipleAllocations: true
+    capacity:
+      children: {value: "2", default: "1", validValues: ["1"]}
+    effectPermissions: [linux/create-ipvlan/v1, linux/link-configure/v1]

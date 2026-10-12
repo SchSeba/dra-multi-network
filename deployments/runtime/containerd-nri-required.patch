@@ -1,0 +1,85 @@
+--- a/vendor/github.com/containerd/nri/pkg/adaptation/adaptation.go
++++ b/vendor/github.com/containerd/nri/pkg/adaptation/adaptation.go
+@@ -31,6 +31,7 @@
+ 	"github.com/containerd/nri/pkg/api"
+ 	"github.com/containerd/nri/pkg/log"
+ 	nriver "github.com/containerd/nri/pkg/version"
++	checks "github.com/containerd/nri/plugins/default-validator"
+ 	validator "github.com/containerd/nri/plugins/default-validator/builtin"
+ 	"github.com/containerd/ttrpc"
+ 
+@@ -77,6 +78,8 @@
+ 	wasmService *api.PluginPlugin
+ 	metrics     Metrics
+ 	deprecation DeprecationRecorder
++
++	requiredPluginValidator *checks.DefaultValidator
+ }
+ 
+ var (
+@@ -153,6 +156,7 @@
+ func WithDefaultValidator(cfg *validator.DefaultValidatorConfig) Option {
+ 	return func(r *Adaptation) error {
+ 		if plugin := validator.GetDefaultValidator(cfg); plugin != nil {
++			r.requiredPluginValidator = checks.NewDefaultValidator(cfg)
+ 			r.builtin = append([]*builtin.BuiltinPlugin{plugin}, r.builtin...)
+ 		}
+ 		return nil
+@@ -339,12 +343,14 @@
+ 	}
+ 
+ 	for _, plugin := range r.plugins {
+-		if validate != nil {
++		rpl, err := plugin.createContainer(ctx, req)
++		if err != nil {
++			return nil, err
++		}
++		// A transport failure closes the plugin and is otherwise ignored.
++		// Such a plugin must not satisfy mandatory participation.
++		if validate != nil && !plugin.isClosed() {
+ 			validate.AddPlugin(plugin.base, plugin.idx)
+-		}
+-		rpl, err := plugin.createContainer(ctx, req)
+-		if err != nil {
+-			return nil, err
+ 		}
+ 		err = result.apply(rpl, plugin.name())
+ 		if err != nil {
+@@ -377,13 +383,21 @@
+ 	defer r.Unlock()
+ 	defer r.removeClosedPlugins()
+ 
++	validate := &ValidateContainerAdjustmentRequest{Pod: req.Pod, Container: req.Container}
+ 	for _, plugin := range r.plugins {
+ 		_, err := plugin.startContainer(ctx, req)
+ 		if err != nil {
+ 			return err
+ 		}
+-	}
+-
++		if !plugin.isClosed() {
++			validate.AddPlugin(plugin.base, plugin.idx)
++		}
++	}
++
++	// Recheck participation when a plugin disappears after successful Create.
++	if r.requiredPluginValidator != nil {
++		return r.requiredPluginValidator.ValidateRequiredPlugins(validate)
++	}
+ 	return nil
+ }
+ 
+--- a/vendor/github.com/containerd/nri/plugins/default-validator/default-validator.go
++++ b/vendor/github.com/containerd/nri/plugins/default-validator/default-validator.go
+@@ -236,6 +236,11 @@
+ 	return fmt.Errorf("%w: attempted restricted sysctl adjustment by plugin(s) %s", ErrValidation, strings.Join(owners, ", "))
+ }
+ 
++// ValidateRequiredPlugins checks runtime participation at additional lifecycle gates.
++func (v *DefaultValidator) ValidateRequiredPlugins(req *api.ValidateContainerAdjustmentRequest) error {
++	return v.validateRequiredPlugins(req)
++}
++
+ func (v *DefaultValidator) validateRequiredPlugins(req *api.ValidateContainerAdjustmentRequest) error {
+ 	var (
+ 		container = req.GetContainer().GetName()

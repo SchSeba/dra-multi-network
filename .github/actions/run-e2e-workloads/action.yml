@@ -1,0 +1,9 @@
+name: Run network smoke test
+description: Run the dual-VF bond and VLAN workload and traffic checks
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        kubeconfig="/root/.kcli/clusters/${CLUSTER_NAME:-multi-network}/auth/kubeconfig"
+        sudo -H -E env "PATH=$PATH" "KUBECONFIG=$kubeconfig" make e2e-workloads

@@ -1,0 +1,11 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata: {name: kernel-rebind}
+spec:
+  effectBudget: {allow: [linux/driver-bind/v1, linux/link-move/v1, linux/link-configure/v1]}
+  steps:
+  - id: endpoint
+    kind: Allocation
+    pluginRef: {name: sriov-cni-rebind}
+    selectors: ['device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:11.0"']
+    config: {mode: kernel, linkType: ethernet, rdmaAccess: false, driver: igbvf, ifName: secondary0, mtu: 1500, up: true}

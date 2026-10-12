@@ -1,0 +1,315 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: programmable-macvlan
+spec:
+  allocationProfileRef:
+    digest: 23bf5d6903187448de3a928feb676418b96aea5bb7e391a8e8d2e1ac56fc1b8b
+    name: macvlan-cni
+  allowedEffects:
+  - linux/create-macvlan/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - bridge
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      up:
+        type: boolean
+    required:
+    - ifName
+    - mtu
+    - up
+    - mode
+    - linkType
+    type: object
+  hooks:
+    ConnectNetwork:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      effects:
+      - id: child
+        inputs:
+          parent:
+            from: call.allocation
+        kind: linux/create-macvlan/v1
+        parameterBindings:
+          ifName:
+            from: call.config.ifName
+          mode:
+            from: call.config.mode
+          mtu:
+            from: call.config.mtu
+        parameters: {}
+        postconditions:
+        - kind: native-state-match
+        recovery:
+          strategy: ObserveAndReconcile
+        requires:
+        - kind: allocation-and-owned-inputs
+      - id: ready
+        inputs:
+          interface:
+            from: effects.child.interface
+        kind: linux/link-configure/v1
+        parameterBindings:
+          mtu:
+            from: call.config.mtu
+          up:
+            from: call.config.up
+        parameters: {}
+        postconditions:
+        - kind: native-state-match
+        recovery:
+          strategy: ObserveAndReconcile
+        requires:
+        - kind: allocation-and-owned-inputs
+      exports:
+        interface:
+          from: effects.ready.interface
+    NodePrepare:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      effects: []
+      exports: {}
+    NodeUnprepare:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      restoreRecordedHook: NodePrepare
+    RemoveNetwork:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      restoreRecordedHook: ConnectNetwork
+  implementation:
+    type: EffectProgram
+    version: allocation-effects-v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Created
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+status: {}
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: programmable-ipvlan
+spec:
+  allocationProfileRef:
+    digest: 82e61696a5b93e57d78cabf73c5812233d4ec88ea692edc5181f8555f3ccc5f8
+    name: ipvlan-cni
+  allowedEffects:
+  - linux/create-ipvlan/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - l2
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      up:
+        type: boolean
+    required:
+    - ifName
+    - mtu
+    - up
+    - mode
+    - linkType
+    type: object
+  hooks:
+    ConnectNetwork:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      effects:
+      - id: child
+        inputs:
+          parent:
+            from: call.allocation
+        kind: linux/create-ipvlan/v1
+        parameterBindings:
+          ifName:
+            from: call.config.ifName
+          mode:
+            from: call.config.mode
+          mtu:
+            from: call.config.mtu
+        parameters: {}
+        postconditions:
+        - kind: native-state-match
+        recovery:
+          strategy: ObserveAndReconcile
+        requires:
+        - kind: allocation-and-owned-inputs
+      - id: ready
+        inputs:
+          interface:
+            from: effects.child.interface
+        kind: linux/link-configure/v1
+        parameterBindings:
+          mtu:
+            from: call.config.mtu
+          up:
+            from: call.config.up
+        parameters: {}
+        postconditions:
+        - kind: native-state-match
+        recovery:
+          strategy: ObserveAndReconcile
+        requires:
+        - kind: allocation-and-owned-inputs
+      exports:
+        interface:
+          from: effects.ready.interface
+    NodePrepare:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      effects: []
+      exports: {}
+    NodeUnprepare:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      restoreRecordedHook: NodePrepare
+    RemoveNetwork:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      restoreRecordedHook: ConnectNetwork
+  implementation:
+    type: EffectProgram
+    version: allocation-effects-v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Created
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+status: {}
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: programmable-vfio
+spec:
+  allocationProfileRef:
+    digest: 3ac769f688c0da89a337076af375db50ced13f31f802b13d274bea5bebba6af3
+    name: sriov-cni-vfio
+  allowedEffects:
+  - linux/driver-bind/v1
+  - runtime/device-access/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      accessBackend:
+        enum:
+        - cdi
+        type: string
+      driver:
+        enum:
+        - vfio-pci
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - vfio
+        type: string
+    required:
+    - mode
+    - linkType
+    - driver
+    - accessBackend
+    type: object
+  hooks:
+    ConnectNetwork:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      effects: []
+      exports:
+        vfio:
+          from: call.prepared.vfio
+    NodePrepare:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      effects:
+      - id: bind
+        inputs:
+          device:
+            from: call.allocation
+        kind: linux/driver-bind/v1
+        parameterBindings:
+          driver:
+            from: call.config.driver
+        parameters: {}
+        postconditions:
+        - kind: native-state-match
+        recovery:
+          strategy: ObserveAndReconcile
+        requires:
+        - kind: allocation-and-owned-inputs
+      - id: access
+        inputs:
+          device:
+            from: effects.bind.device
+        kind: runtime/device-access/v1
+        parameterBindings:
+          accessBackend:
+            from: call.config.accessBackend
+          mode:
+            from: call.config.mode
+        parameters: {}
+        postconditions:
+        - kind: native-state-match
+        recovery:
+          strategy: ObserveAndReconcile
+        requires:
+        - kind: allocation-and-owned-inputs
+      exports:
+        vfio:
+          from: effects.access.device
+    NodeUnprepare:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      restoreRecordedHook: NodePrepare
+    RemoveNetwork:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      restoreRecordedHook: ConnectNetwork
+  implementation:
+    type: EffectProgram
+    version: allocation-effects-v1
+  kind: Allocation
+  outputs:
+    vfio:
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: VFIODevice/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+status: {}

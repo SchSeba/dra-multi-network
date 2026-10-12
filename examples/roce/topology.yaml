@@ -1,0 +1,22 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata:
+  name: single-port-roce
+spec:
+  effectBudget:
+    allow:
+      - linux/rdma-namespace/v1
+      - runtime/device-access/v1
+  steps:
+    - id: root
+      kind: Allocation
+      pluginRef: {name: host-cni-roce}
+      config:
+        mode: rdma
+        linkType: ethernet
+        rdmaAccess: true
+        rdmaProfile: roce-single-port-v1
+        accessBackend: nri
+        ifName: roce0
+        mtu: 1500
+        up: true

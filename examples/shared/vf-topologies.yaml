@@ -1,0 +1,35 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata: {name: vf-macvlan}
+spec:
+  effectBudget: {allow: [linux/create-macvlan/v1, linux/link-configure/v1]}
+  steps:
+  - id: secondary
+    kind: Allocation
+    pluginRef: {name: macvlan-cni}
+    selectors: ['device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:10.0"']
+    config: {ifName: secondary0, mtu: 1500, up: true, mode: bridge, linkType: ethernet}
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata: {name: vf-ipvlan}
+spec:
+  effectBudget: {allow: [linux/create-ipvlan/v1, linux/link-configure/v1]}
+  steps:
+  - id: secondary
+    kind: Allocation
+    pluginRef: {name: ipvlan-cni}
+    selectors: ['device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:10.2"']
+    config: {ifName: secondary0, mtu: 1500, up: true, mode: l2, linkType: ethernet}
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata: {name: vf-handoff}
+spec:
+  effectBudget: {allow: [linux/link-move/v1, linux/link-configure/v1]}
+  steps:
+  - id: secondary
+    kind: Allocation
+    pluginRef: {name: sriov-cni}
+    selectors: ['device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:10.0"']
+    config: {ifName: secondary0, mtu: 1500, up: true, mode: kernel, linkType: ethernet, rdmaAccess: false}

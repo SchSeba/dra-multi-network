@@ -1,0 +1,262 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata:
+  name: secondary-host
+spec:
+  action: Expose
+  exposure:
+    effectPermissions:
+    - linux/link-move/v1
+    - linux/link-configure/v1
+    mode: kernel
+    persona: kernel
+    plugin: host-cni
+  priority: 100
+  selector:
+    kind: PF
+    pciAddresses:
+    - "0000:29:00.0"
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata:
+  name: secondary-macvlan
+spec:
+  action: Expose
+  exposure:
+    allowMultipleAllocations: true
+    capacity:
+      children:
+        default: "1"
+        validValues:
+        - "1"
+        value: "2"
+    effectPermissions:
+    - linux/create-macvlan/v1
+    - linux/link-configure/v1
+    mode: bridge
+    persona: macvlan
+    plugin: programmable-macvlan
+  priority: 100
+  selector:
+    kind: PF
+    pciAddresses:
+    - "0000:29:00.0"
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata:
+  name: secondary-ipvlan
+spec:
+  action: Expose
+  exposure:
+    allowMultipleAllocations: true
+    capacity:
+      children:
+        default: "1"
+        validValues:
+        - "1"
+        value: "2"
+    effectPermissions:
+    - linux/create-ipvlan/v1
+    - linux/link-configure/v1
+    mode: l2
+    persona: ipvlan
+    plugin: programmable-ipvlan
+  priority: 100
+  selector:
+    kind: PF
+    pciAddresses:
+    - "0000:29:00.0"
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata:
+  name: vf-macvlan
+spec:
+  action: Expose
+  exposure:
+    allowMultipleAllocations: true
+    capacity:
+      children:
+        default: "1"
+        validValues:
+        - "1"
+        value: "2"
+    effectPermissions:
+    - linux/create-macvlan/v1
+    - linux/link-configure/v1
+    mode: bridge
+    persona: macvlan
+    plugin: programmable-macvlan
+  priority: 100
+  selector:
+    kind: VF
+    pciAddresses:
+    - "0000:29:10.0"
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata:
+  name: vf-ipvlan
+spec:
+  action: Expose
+  exposure:
+    allowMultipleAllocations: true
+    capacity:
+      children:
+        default: "1"
+        validValues:
+        - "1"
+        value: "2"
+    effectPermissions:
+    - linux/create-ipvlan/v1
+    - linux/link-configure/v1
+    mode: l2
+    persona: ipvlan
+    plugin: programmable-ipvlan
+  priority: 100
+  selector:
+    kind: VF
+    pciAddresses:
+    - "0000:29:10.2"
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata:
+  name: shared-macvlan
+spec:
+  effectBudget:
+    allow:
+    - linux/create-macvlan/v1
+    - linux/link-configure/v1
+  steps:
+  - config:
+      ifName: secondary0
+      linkType: ethernet
+      mode: bridge
+      mtu: 1500
+      up: true
+    id: secondary
+    kind: Allocation
+    pluginRef:
+      name: programmable-macvlan
+    selectors:
+    - device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:00.0"
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata:
+  name: shared-ipvlan
+spec:
+  effectBudget:
+    allow:
+    - linux/create-ipvlan/v1
+    - linux/link-configure/v1
+  steps:
+  - config:
+      ifName: secondary0
+      linkType: ethernet
+      mode: l2
+      mtu: 1500
+      up: true
+    id: secondary
+    kind: Allocation
+    pluginRef:
+      name: programmable-ipvlan
+    selectors:
+    - device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:00.0"
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata:
+  name: secondary-pf-handoff
+spec:
+  effectBudget:
+    allow:
+    - linux/link-move/v1
+    - linux/link-configure/v1
+  steps:
+  - config:
+      ifName: secondary0
+      linkType: ethernet
+      mode: kernel
+      mtu: 1500
+      rdmaAccess: false
+      up: true
+    id: secondary
+    kind: Allocation
+    pluginRef:
+      name: host-cni
+    selectors:
+    - device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:00.0"
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata:
+  name: vf-macvlan
+spec:
+  effectBudget:
+    allow:
+    - linux/create-macvlan/v1
+    - linux/link-configure/v1
+  steps:
+  - config:
+      ifName: secondary0
+      linkType: ethernet
+      mode: bridge
+      mtu: 1500
+      up: true
+    id: secondary
+    kind: Allocation
+    pluginRef:
+      name: programmable-macvlan
+    selectors:
+    - device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:10.0"
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata:
+  name: vf-ipvlan
+spec:
+  effectBudget:
+    allow:
+    - linux/create-ipvlan/v1
+    - linux/link-configure/v1
+  steps:
+  - config:
+      ifName: secondary0
+      linkType: ethernet
+      mode: l2
+      mtu: 1500
+      up: true
+    id: secondary
+    kind: Allocation
+    pluginRef:
+      name: programmable-ipvlan
+    selectors:
+    - device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:10.2"
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata:
+  name: vf-handoff
+spec:
+  effectBudget:
+    allow:
+    - linux/link-move/v1
+    - linux/link-configure/v1
+  steps:
+  - config:
+      ifName: secondary0
+      linkType: ethernet
+      mode: kernel
+      mtu: 1500
+      rdmaAccess: false
+      up: true
+    id: secondary
+    kind: Allocation
+    pluginRef:
+      name: sriov-cni
+    selectors:
+    - device.attributes["dra-multi-network.schseba.github.io"].pciAddress == "0000:29:10.0"

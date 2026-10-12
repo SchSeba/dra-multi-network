@@ -1,0 +1,18 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata:
+  name: single-port-ib-verbs
+spec:
+  effectBudget:
+    allow: [linux/rdma-namespace/v1, runtime/device-access/v1]
+  steps:
+    - id: root
+      kind: Allocation
+      pluginRef: {name: host-cni-ib-verbs}
+      config:
+        mode: rdma
+        linkType: infiniband
+        rdmaAccess: true
+        rdmaProfile: ib-verbs-single-port-v1
+        accessBackend: nri
+        madAccess: false

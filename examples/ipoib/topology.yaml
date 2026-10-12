@@ -1,0 +1,21 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkTopology
+metadata:
+  name: single-port-ipoib
+spec:
+  effectBudget:
+    allow: [linux/rdma-namespace/v1, runtime/device-access/v1]
+  steps:
+    - id: root
+      kind: Allocation
+      pluginRef: {name: host-cni-ipoib}
+      config:
+        mode: rdma
+        linkType: infiniband
+        rdmaAccess: true
+        rdmaProfile: ib-ipoib-single-port-v1
+        accessBackend: nri
+        madAccess: true
+        ifName: ipoib0
+        mtu: 2044
+        up: true

@@ -1,0 +1,24 @@
+dra-multi-network
+Copyright 2026 The Kubernetes Authors.
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project starts from k8snetworkplumbingwg/dra-driver-sriov
+(https://github.com/k8snetworkplumbingwg/dra-driver-sriov). Reused discovery, host,
+CDI, build and lab code retains its upstream copyright notices.
+
+Native networking behavior and adapted code reference these Apache-2.0 projects:
+- containernetworking/plugins, host-device, VLAN, macvlan and ipvlan:
+  revision 257ef09a103e8b8fe91a0fefe8680c01f84b520b.
+  Copyright CNI authors.
+- k8snetworkplumbingwg/sriov-cni, pkg/sriov/sriov.go:
+  revision b536073521baf5bfba748e9d3da27ef736f48679.
+  Copyright Intel Corporation and contributors.
+- k8snetworkplumbingwg/bond-cni, bond/bond.go:
+  revision f593e15f3935c8e73a6f66f2a718827ccfce494f.
+- k8snetworkplumbingwg/accelerated-bridge-cni, pkg/manager:
+  revision 8035095fefd1be945f805992902873e7aeeae704.
+- k8snetworkplumbingwg/ovs-cni, pkg/ovsdb:
+  revision d893f044ce6dc4214086ba9c054203d675180631.
+
+The source files retain applicable upstream notices. These references do not
+imply upstream endorsement. Third-party Go dependencies retain their own licenses.

@@ -1,0 +1,131 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: programmable-sriov
+spec:
+  allocationProfileRef:
+    digest: b385151d20cbddf1dd8864fa0424b62827d146c28d4b20fb13477c775ddab82d
+    name: sriov-cni-rebind
+  allowedEffects:
+  - linux/driver-bind/v1
+  - linux/link-move/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      driver:
+        pattern: ^[A-Za-z0-9_-]{1,64}$
+        type: string
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - kernel
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      rdmaAccess:
+        enum:
+        - false
+        type: boolean
+      selectedDriver:
+        pattern: ^[A-Za-z0-9_-]{1,64}$
+        type: string
+      up:
+        type: boolean
+    required:
+    - mode
+    - linkType
+    - rdmaAccess
+    - driver
+    - ifName
+    - mtu
+    - up
+    - selectedDriver
+    type: object
+  hooks:
+    ConnectNetwork:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      effects:
+      - id: attach
+        inputs:
+          interface:
+            from: call.allocation
+        kind: linux/link-move/v1
+        parameterBindings:
+          ifName:
+            from: call.config.ifName
+        parameters: {}
+        postconditions:
+        - kind: native-state-match
+        recovery:
+          strategy: ObserveAndReconcile
+        requires:
+        - kind: allocation-and-owned-inputs
+      - id: ready
+        inputs:
+          interface:
+            from: effects.attach.interface
+        kind: linux/link-configure/v1
+        parameterBindings:
+          mtu:
+            from: call.config.mtu
+          up:
+            from: call.config.up
+        parameters: {}
+        postconditions:
+        - kind: native-state-match
+        recovery:
+          strategy: ObserveAndReconcile
+        requires:
+        - kind: allocation-and-owned-inputs
+      exports:
+        interface:
+          from: effects.ready.interface
+    NodePrepare:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      effects:
+      - id: prepare-driver
+        inputs:
+          device:
+            from: call.allocation
+        kind: linux/driver-bind/v1
+        parameterBindings:
+          driver:
+            from: call.config.selectedDriver
+        parameters: {}
+        postconditions:
+        - kind: native-state-match
+        recovery:
+          strategy: ObserveAndReconcile
+        requires:
+        - kind: allocation-and-owned-inputs
+      exports: {}
+    NodeUnprepare:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      restoreRecordedHook: NodePrepare
+    RemoveNetwork:
+      apiVersion: effects.dra-multi-network.schseba.github.io/v1alpha1
+      restoreRecordedHook: ConnectNetwork
+  implementation:
+    type: EffectProgram
+    version: allocation-effects-v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+status: {}

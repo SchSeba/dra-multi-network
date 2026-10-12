@@ -1,0 +1,33 @@
+name: Virtual cluster smoke test
+on:
+  workflow_dispatch:
+    inputs:
+      single-node:
+        description: Use one node for the lab
+        type: boolean
+        default: true
+permissions:
+  contents: read
+jobs:
+  virtual-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-virtual-e2e-host
+        with:
+          go-version: 1.27.x
+      - uses: ./.github/actions/deploy-virtual-cluster
+        with:
+          single-node: ${{ inputs.single-node }}
+      - uses: ./.github/actions/run-e2e-workloads
+      - if: failure()
+        uses: ./.github/actions/collect-virtual-e2e-logs
+        with:
+          test-report-path: test-reports/virtual
+          vm-names: multi-network-ctlplane-0,multi-network-worker-0,multi-network-worker-1
+      - if: failure()
+        uses: ./.github/actions/upload-e2e-reports
+        with:
+          artifact-name: virtual-cluster-reports
+          report-path: test-reports/virtual/

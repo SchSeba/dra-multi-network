@@ -1,0 +1,20 @@
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: DeviceExposurePolicy
+metadata: {name: secondary-vf-reset}
+spec:
+  priority: 100
+  action: Expose
+  selector:
+    kind: VF
+    pciAddresses: ["0000:29:11.0"]
+  exposure:
+    persona: reset
+    plugin: sriov-cni-reset
+    mode: kernel
+    allowedDrivers: [igbvf]
+    allowedResetMethods: [flr]
+    effectPermissions:
+      - linux/pci-reset/v1
+      - linux/driver-bind/v1
+      - linux/link-move/v1
+      - linux/link-configure/v1
