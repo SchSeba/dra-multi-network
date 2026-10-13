@@ -22,10 +22,15 @@ flowchart LR
 ```
 
 The first POC includes internal `host-cni`, `sriov-cni`, `bond-cni`, `vlan-cni`,
-`macvlan-cni`, `ipvlan-cni`, `accelerated-bridge-cni` and `ovs-cni` planners.
-The DRA framework owns discovery, allocation, native execution and recovery;
-plugins use a separate serializable contract. GA will move **all** implementations
-behind gRPC. MVP uses Go calls and does not invoke CNI binaries.
+`macvlan-cni`, `ipvlan-cni`, `tuning-cni`, `accelerated-bridge-cni`, `ovs-cni`, `ipam` and
+`address-cni` planners.
+The current POC owns discovery, allocation, native execution and recovery in the
+framework; internal planners use a separate serializable contract. The production
+target moves plugin-specific validation/planning **and native network execution**
+to external gRPC plugins so vendors can add behavior without core handlers. Core
+DRA, policy and lifecycle coordination remain shared. The execution RPC and
+durable recovery boundary are future work; the existing SDK is planning-only.
+MVP uses Go calls and does not invoke CNI binaries.
 
 Implemented profiles cover exclusive host/VF interfaces, two VFs → active-backup
 bond → multiple VLANs, shared macvlan/ipvlan, VF settings, VFIO, approved driver
@@ -64,6 +69,12 @@ native VLAN 100 and tagged VLANs 200/300. The [shared setup](examples/switchdev/
 explains running both together; [validation](docs/validation.md) records live mock
 traffic, restart, cleanup, eswitch transitions and OVS TC offload results.
 
+For DRA-backed address allocation, use the [macvlan IPAM example](examples/ipam/README.md)
+or [two VFs with two IP addresses](examples/ipam/two-vf/README.md). The
+[IPAM design](docs/ipam-plan.md) explains subnet capacity and lease ownership;
+the [end-to-end checks](test/integration/ipam/README.md) cover traffic, exhaustion,
+reuse, restart and cleanup.
+
 ## Documentation
 
 | Reader | Start here |
@@ -72,6 +83,8 @@ traffic, restart, cleanup, eswitch transitions and OVS TC offload results.
 | Administrator debugging allocation | [CRDs → DeviceClasses and ResourceSlices](docs/admin/resource-translation.md), [operations](docs/operations.md) |
 | Application user | [Connect a Pod](docs/user/pods.md), [examples](examples/README.md) |
 | Contributor | [Architecture](docs/architecture.md), [development](docs/development.md), [API reference](docs/api-reference.md), [plugin boundary](pkg/pluginapi/README.md) |
+| Network plugin owner | [Production gRPC design and deployment examples](docs/grpc-plugins.md) |
+| IPAM developer | [IPAM design](docs/ipam-plan.md), [provider interface](pkg/ipam/provider.go), [provider tests](pkg/ipam/provider_test.go) |
 | POC reviewer | [Validation](docs/validation.md), [remaining work](docs/roadmap.md) |
 
 Configuration uses the five official project CRDs under

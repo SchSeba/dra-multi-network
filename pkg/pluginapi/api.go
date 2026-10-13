@@ -32,6 +32,7 @@ const (
 	UplinkConfigure  = "linux/shared-uplink-vlan/v1"
 	Move             = "linux/link-move/v1"
 	Configure        = "linux/link-configure/v1"
+	IPv4Forwarding   = "linux/ipv4-forwarding/v1"
 	CreateBond       = "linux/create-bond/v1"
 	AttachMaster     = "linux/attach-master/v1"
 	CreateVLAN       = "linux/create-vlan/v1"
@@ -68,6 +69,7 @@ type Result struct {
 }
 
 type Config struct {
+	IPv4Forward       *bool       `json:"ipv4Forward,omitempty"`
 	Network           string      `json:"network,omitempty"`
 	Subnet            string      `json:"subnet,omitempty"`
 	IfName            string      `json:"ifName,omitempty"`

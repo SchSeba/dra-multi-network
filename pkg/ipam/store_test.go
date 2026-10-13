@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	resourceapi "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,6 +40,9 @@ func testStore(t *testing.T) (Store, corev1.Node) {
 	if err := resourceapi.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
+	if err := networkingv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&cm, &ledger).Build()
 	return Store{Client: c, Namespace: "driver"}, corev1.Node{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"fabric": "blue"}}}
 }
@@ -60,7 +64,7 @@ func TestConcurrentReservationCapacityReplayAndCleanup(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			c, r := testClaim(i + 1)
-			leases[i], errs[i] = s.Reserve(ctx, c, r, node)
+			leases[i], errs[i] = reserveClaim(ctx, s, c, r, node)
 		}(i)
 	}
 	wg.Wait()
@@ -74,40 +78,40 @@ func TestConcurrentReservationCapacityReplayAndCleanup(t *testing.T) {
 		}
 		seen[l.Address] = true
 		c, r := testClaim(i + 1)
-		replayed, err := s.Reserve(ctx, c, r, node)
+		replayed, err := reserveClaim(ctx, s, c, r, node)
 		if err != nil || replayed.Address != l.Address {
 			t.Fatal("retry changed address", err)
 		}
 	}
 	sixth, r := testClaim(6)
-	if _, err := s.Reserve(ctx, sixth, r, node); err == nil {
+	if _, err := reserveClaim(ctx, s, sixth, r, node); err == nil {
 		t.Fatal("exhausted pool allocated")
 	}
 	lease := leases[0]
-	if err := s.Holder(ctx, lease, "sandbox", true); err != nil {
+	if err := s.AcquireHolder(ctx, HolderRequest{Lease: lease, Holder: "sandbox"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Release(ctx, types.UID(lease.ClaimUID)); err == nil {
+	if err := s.Release(ctx, lease.ClaimUID); err == nil {
 		t.Fatal("unprepare freed an active address")
 	}
-	if err := s.Holder(ctx, lease, "late-sandbox", true); err == nil {
+	if err := s.AcquireHolder(ctx, HolderRequest{Lease: lease, Holder: "late-sandbox"}); err == nil {
 		t.Fatal("release accepted a new holder")
 	}
-	if err := s.Holder(ctx, lease, "sandbox", false); err != nil {
+	if err := s.ReleaseHolder(ctx, HolderRequest{Lease: lease, Holder: "sandbox"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Release(ctx, types.UID(lease.ClaimUID)); err != nil {
+	if err := s.Release(ctx, lease.ClaimUID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Holder(ctx, lease, "sandbox", false); err != nil {
+	if err := s.ReleaseHolder(ctx, HolderRequest{Lease: lease, Holder: "sandbox"}); err != nil {
 		t.Fatal("cleanup replay after lost response", err)
 	}
-	reused, err := s.Reserve(ctx, sixth, r, node)
+	reused, err := reserveClaim(ctx, s, sixth, r, node)
 	if err != nil || reused.Address != lease.Address {
 		t.Fatal("capacity not released", err)
 	}
 	first, r := testClaim(1)
-	if _, err := s.Reserve(ctx, first, r, node); err == nil {
+	if _, err := reserveClaim(ctx, s, first, r, node); err == nil {
 		t.Fatal("released incarnation reopened")
 	}
 }
@@ -116,11 +120,11 @@ func TestLeaseAuthorityAndLedgerLoss(t *testing.T) {
 	ctx := context.Background()
 	c, r := testClaim(1)
 	c.Status.Allocation.Devices.Config[0].Source = resourceapi.AllocationConfigSourceClaim
-	if _, err := s.Reserve(ctx, c, r, node); err == nil {
+	if _, err := reserveClaim(ctx, s, c, r, node); err == nil {
 		t.Fatal("claim-supplied IPAM contract accepted")
 	}
 	c.Status.Allocation.Devices.Config[0].Source = resourceapi.AllocationConfigSourceClass
-	l, err := s.Reserve(ctx, c, r, node)
+	l, err := reserveClaim(ctx, s, c, r, node)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +144,7 @@ func TestLeaseAuthorityAndLedgerLoss(t *testing.T) {
 	if err := s.EnsureLedger(ctx, pool); err == nil {
 		t.Fatal("missing ledger recreated empty")
 	}
-	if _, err := s.Reserve(ctx, c, r, node); err == nil {
+	if _, err := reserveClaim(ctx, s, c, r, node); err == nil {
 		t.Fatal("missing durable state allowed allocation")
 	}
 	var recreated corev1.ConfigMap
@@ -177,4 +181,12 @@ func TestNodeEntitlementRepeatsExplicitCapacityValidation(t *testing.T) {
 	if _, err := Entitlement(claim, result); err == nil {
 		t.Fatal("node accepted omitted capacity despite consumed-capacity result")
 	}
+}
+
+func reserveClaim(ctx context.Context, provider Provider, claim *resourceapi.ResourceClaim, result resourceapi.DeviceRequestAllocationResult, node corev1.Node) (Lease, error) {
+	request, err := ReservationRequest(claim, result, node)
+	if err != nil {
+		return Lease{}, err
+	}
+	return provider.Reserve(ctx, request)
 }

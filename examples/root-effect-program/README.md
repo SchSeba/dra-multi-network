@@ -3,8 +3,10 @@
 This advanced administrator example replaces native allocation **planning** with
 typed templates while locking physical authority to a canonical profile.
 `plugin.yaml` references the native rebind contract by name/digest; `topology.yaml`
-composes two programmable VFs with a builtin bond and three VLANs. The allocation
-profile, required config, output types/effects and cleanup contract remain fixed.
+composes two programmable VFs with a builtin bond and three VLANs. Each VLAN
+feeds a `tuning-cni` Operation that enables per-interface IPv4 forwarding,
+which the shared bond/VLAN workload verifies. The allocation profile, required
+config, output types/effects and cleanup contract remain fixed.
 
 Commands below run from the repository root. Install the [driver](../../docs/installation.md),
 set `KUBECONFIG`, and adapt policy/topology PCI addresses to dedicated secondary

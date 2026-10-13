@@ -120,6 +120,27 @@ func (s Store) Pools(ctx context.Context) ([]Pool, error) {
 	}
 	return pools, nil
 }
+func poolInfo(p Pool) PoolInfo {
+	return PoolInfo{Name: p.Object.Name, UID: string(p.Object.UID), Config: p.Config, ConfigDigest: topology.Digest(p.Config), Capacity: len(p.Addresses), Deleting: !p.Object.DeletionTimestamp.IsZero()}
+}
+func (s Store) ListPools(ctx context.Context) ([]PoolInfo, error) {
+	pools, err := s.Pools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]PoolInfo, 0, len(pools))
+	for _, p := range pools {
+		result = append(result, poolInfo(p))
+	}
+	return result, nil
+}
+func (s Store) GetPool(ctx context.Context, name string) (PoolInfo, error) {
+	p, err := s.Load(ctx, name)
+	if err != nil {
+		return PoolInfo{}, err
+	}
+	return poolInfo(p), nil
+}
 func LedgerName(p Pool) string { return "ipam-ledger-" + topology.Digest(string(p.Object.UID))[:24] }
 func (s Store) Load(ctx context.Context, name string) (Pool, error) {
 	var cm corev1.ConfigMap
@@ -255,29 +276,47 @@ func Entitlement(claim *resourceapi.ResourceClaim, result resourceapi.DeviceRequ
 	}
 	return c, topology.ValidateIPAMConfig(c)
 }
-func Reservation(claim *resourceapi.ResourceClaim, result resourceapi.DeviceRequestAllocationResult, p Pool) Lease {
-	l := Lease{Pool: p.Object.Name, PoolUID: string(p.Object.UID), ConfigDigest: topology.Digest(p.Config), ClaimUID: string(claim.UID), Fingerprint: Fingerprint(claim), Request: result.Request, ShareID: string(*result.ShareID), State: Prepared}
-	l.Key = topology.Digest([]string{l.ClaimUID, l.Request, result.Driver, result.Pool, result.Device, l.ShareID})
-	return l
+func Reservation(claim *resourceapi.ResourceClaim, result resourceapi.DeviceRequestAllocationResult, p PoolInfo) Lease {
+	return reservation(allocationRequest(claim, result), p)
 }
-func (s Store) Reserve(ctx context.Context, claim *resourceapi.ResourceClaim, result resourceapi.DeviceRequestAllocationResult, node corev1.Node) (Lease, error) {
+func allocationRequest(claim *resourceapi.ResourceClaim, result resourceapi.DeviceRequestAllocationResult) ReserveRequest {
+	return ReserveRequest{ClaimUID: string(claim.UID), Fingerprint: Fingerprint(claim), Request: result.Request, Driver: result.Driver, Pool: result.Pool, Device: result.Device, ShareID: string(*result.ShareID)}
+}
+func ReservationRequest(claim *resourceapi.ResourceClaim, result resourceapi.DeviceRequestAllocationResult, node corev1.Node) (ReserveRequest, error) {
 	c, err := Entitlement(claim, result)
 	if err != nil {
+		return ReserveRequest{}, err
+	}
+	r := allocationRequest(claim, result)
+	r.Network, r.Subnet, r.NodeLabels = c.Network, c.Subnet, node.Labels
+	return r, nil
+}
+func reservation(r ReserveRequest, p PoolInfo) Lease {
+	l := Lease{Pool: p.Name, PoolUID: p.UID, ConfigDigest: p.ConfigDigest, ClaimUID: r.ClaimUID, Fingerprint: r.Fingerprint, Request: r.Request, ShareID: r.ShareID, State: Prepared}
+	l.Key = topology.Digest([]string{l.ClaimUID, l.Request, r.Driver, r.Pool, r.Device, l.ShareID})
+	return l
+}
+func (s Store) Reserve(ctx context.Context, r ReserveRequest) (Lease, error) {
+	c := topology.Config{Network: r.Network, Subnet: r.Subnet}
+	if err := topology.ValidateIPAMConfig(c); err != nil {
 		return Lease{}, err
+	}
+	if r.ClaimUID == "" || r.Fingerprint == "" || r.Request == "" || r.ShareID == "" || r.Driver != topology.IPAMDriver {
+		return Lease{}, fmt.Errorf("E_IPAM_ENTITLEMENT")
 	}
 	p, err := s.ForConfig(ctx, c)
 	if err != nil {
 		return Lease{}, err
 	}
-	if result.Pool != p.Object.Name || result.Device != "subnet" {
+	if r.Pool != p.Object.Name || r.Device != "subnet" {
 		return Lease{}, fmt.Errorf("E_IPAM_ALLOCATION_SCOPE")
 	}
 	for key, value := range p.Config.NodeSelector {
-		if node.Labels[key] != value {
+		if r.NodeLabels[key] != value {
 			return Lease{}, fmt.Errorf("E_IPAM_NODE_SCOPE")
 		}
 	}
-	l := Reservation(claim, result, p)
+	l := reservation(r, poolInfo(p))
 	err = s.update(ctx, p, func(leases map[string]Lease) error {
 		if previous, ok := leases[l.Key]; ok {
 			// shortcut: released claims require a new UID; add preparation-incarnation fencing before supporting claim reuse.
@@ -319,7 +358,13 @@ func (s Store) Lookup(ctx context.Context, expected Lease) (Lease, error) {
 	}
 	return l, nil
 }
-func (s Store) Holder(ctx context.Context, expected Lease, holder string, add bool) error {
+func (s Store) AcquireHolder(ctx context.Context, r HolderRequest) error {
+	return s.holder(ctx, r.Lease, r.Holder, true)
+}
+func (s Store) ReleaseHolder(ctx context.Context, r HolderRequest) error {
+	return s.holder(ctx, r.Lease, r.Holder, false)
+}
+func (s Store) holder(ctx context.Context, expected Lease, holder string, add bool) error {
 	if holder == "" {
 		return fmt.Errorf("E_IPAM_HOLDER_IDENTITY")
 	}
@@ -347,7 +392,10 @@ func (s Store) Holder(ctx context.Context, expected Lease, holder string, add bo
 		return nil
 	})
 }
-func (s Store) Release(ctx context.Context, uid types.UID) error {
+func (s Store) Release(ctx context.Context, uid string) error {
+	if uid == "" {
+		return fmt.Errorf("E_IPAM_CLAIM_IDENTITY")
+	}
 	pools, err := s.Pools(ctx)
 	if err != nil {
 		return err
@@ -356,7 +404,7 @@ func (s Store) Release(ctx context.Context, uid types.UID) error {
 	for _, p := range pools {
 		if err := s.update(ctx, p, func(leases map[string]Lease) error {
 			for key, l := range leases {
-				if l.ClaimUID != string(uid) || l.State == Released {
+				if l.ClaimUID != uid || l.State == Released {
 					continue
 				}
 				l.State = Releasing

@@ -37,6 +37,7 @@ spec:
       for tag in 100 200 300; do
         ip -d link show "tenant$tag"
         ip -d -o link show "tenant$tag" | grep -q "vlan protocol 802.1Q id $tag "
+        test "$(cat /proc/sys/net/ipv4/conf/tenant$tag/forwarding)" = 1
       done
       test "$(cat /sys/class/net/bond0/bonding/mode)" = "active-backup 1"
       test "$(tr ' ' '\n' < /sys/class/net/bond0/bonding/slaves | sed '/^$/d' | sort | xargs)" = "vfleft vfright"

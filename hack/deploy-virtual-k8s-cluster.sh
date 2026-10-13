@@ -5,10 +5,8 @@ source hack/common.sh
 
 NUM_OF_WORKERS=${NUM_OF_WORKERS:-2}
 export OPERATOR_EXEC=kubectl
-# Optional mock switchdev PF; only the dedicated secondary NIC is bound.
-MOCK_SMARTNIC_REPO=${MOCK_SMARTNIC_REPO:-}
-MOCK_SMARTNIC_REF=${MOCK_SMARTNIC_REF:-724d8984696f9124f777776e45d2108cec60c214}
-MOCK_SMARTNIC_KERNEL=${MOCK_SMARTNIC_KERNEL:-5.14.0-427.el9.x86_64}
+# The third NIC is dedicated to the mock; the secondary stays on native igb.
+MOCK_SMARTNIC_REPO=${MOCK_SMARTNIC_REPO-https://github.com/SchSeba/switchdev-mock-driver.git}
 declare -A MOCK_SMARTNIC_BOOTS=()
 export CNI_PLUGINS_URL="https://github.com/containernetworking/plugins/releases/download/v1.9.1/cni-plugins-linux-amd64-v1.9.1.tgz"
 
@@ -49,15 +47,13 @@ Environment:
   SERVICE_CIDR      Service subnet (default: 10.112.0.0/16).
   API_IP            API address (default: 192.168.130.250).
   VIRTUAL_ROUTER_ID  Router ID (default: 210).
-  MOCK_SMARTNIC_REPO Optional HTTPS mock repo; enable with
-                    https://github.com/SchSeba/switchdev-mock-driver.git.
-  MOCK_SMARTNIC_REF  Full commit SHA (default: 724d8984696f9124f777776e45d2108cec60c214).
-  MOCK_SMARTNIC_KERNEL Running guest kernel pin (default: 5.14.0-427.el9.x86_64).
+  MOCK_SMARTNIC_REPO HTTPS mock repo (default: https://github.com/SchSeba/switchdev-mock-driver.git).
+                    Set empty to omit the third NIC and mock setup.
 
-Mock mode installs OVS/module on SR-IOV hosts and creates five VFs only on the
-XML-attested secondary PF. It leaves legacy mode for DRA eswitch policies,
-enables the DRA OVS socket mount, and does not deploy the SR-IOV operator.
-Workers must already boot the selected kernel; this script does not install it.
+Workload nodes have a management NIC, a native igb NIC and a mock switchdev NIC.
+The mock is built from main for the running guest kernel. Four VFs are created
+on each attested test PF; no VFs are created on management. OVS/socket access is
+installed for the combined bond/OVS example; no SR-IOV operator is deployed.
 EOF
       exit 0
       ;;
@@ -70,11 +66,13 @@ EOF
 done
 
 if [[ -n $MOCK_SMARTNIC_REPO ]]; then
-  [[ $MOCK_SMARTNIC_REPO =~ ^https://[a-zA-Z0-9.-]+(:[0-9]+)?/[a-zA-Z0-9._/-]+$ && $MOCK_SMARTNIC_REF =~ ^[0-9a-f]{40}$ && $MOCK_SMARTNIC_KERNEL =~ ^[a-zA-Z0-9_.+-]+$ ]] || {
-    echo 'Mock driver requires an HTTPS repository, full commit SHA and pinned running kernel.' >&2
+  [[ $MOCK_SMARTNIC_REPO =~ ^https://[a-zA-Z0-9.-]+(:[0-9]+)?/[a-zA-Z0-9._/-]+$ ]] || {
+    echo 'Mock driver requires an HTTPS repository.' >&2
     exit 1
   }
 fi
+
+[[ $NUM_OF_WORKERS =~ ^[0-9]+$ && $NUM_OF_WORKERS -le 256 ]] || { echo "NUM_OF_WORKERS must be between 0 and 256" >&2; exit 1; }
 
 if [[ "$NUM_OF_WORKERS" -eq 0 ]]; then
   SINGLE_NODE=true
@@ -92,8 +90,7 @@ if [[ ${#network_name} -gt 15 || ${#sriov_network_name} -gt 15 ]]; then
 fi
 
 check_requirements() {
-  local -a cmds=(kcli virsh podman make go)
-  [[ -z $MOCK_SMARTNIC_REPO ]] || cmds+=(python3 timeout)
+  local -a cmds=(kcli virsh podman make go python3 timeout)
   for cmd in "${cmds[@]}"; do
     if ! command -v "$cmd" &> /dev/null; then
       echo "$cmd is not available"
@@ -130,30 +127,6 @@ create_networks() {
 }
 
 write_cluster_plan() {
-  local sriov_vmrule
-  sriov_vmrule=$(cat <<EOF
-      nets:
-        - name: ${network_name}
-          type: igb
-          vfio: true
-          noconf: true
-          numa: 0
-        - name: ${sriov_network_name}
-          type: igb
-          vfio: true
-          noconf: true
-          numa: 1
-      numcpus: 6
-      numa:
-        - id: 0
-          vcpus: 0,2,4
-          memory: 2048
-        - id: 1
-          vcpus: 1,3,5
-          memory: 2048
-EOF
-)
-
   cat <<EOF > "./${cluster_name}-plan.yaml"
 version: $cluster_version
 ctlplane_memory: 4096
@@ -179,21 +152,60 @@ feature_gates:
   - DRADeviceCompatibilityGroups
 autolabeller: false
 vmrules:
-$(if $SINGLE_NODE; then
-  printf '  - %s-ctlplane-.*:\n%s\n' "$cluster_name" "$sriov_vmrule"
-else
-  cat <<VMRULES
-  - $cluster_name-ctlplane-.*:
+EOF
+  if ! $SINGLE_NODE; then
+    cat <<EOF >> "./${cluster_name}-plan.yaml"
+  - $cluster_name-ctlplane-0$:
       nets:
         - name: ${network_name}
           type: igb
           vfio: true
           noconf: true
-  - $cluster_name-worker-.*:
-$sriov_vmrule
-VMRULES
-fi)
 EOF
+  fi
+  local count=$NUM_OF_WORKERS vm native_mac mock_mac
+  $SINGLE_NODE && count=1
+  for ((num=0; num<count; num++)); do
+    vm="$cluster_name-worker-$num"
+    $SINGLE_NODE && vm="$cluster_name-ctlplane-0"
+    printf -v native_mac '52:54:00:fa:%02x:02' "$num"
+    printf -v mock_mac '52:54:00:fa:%02x:03' "$num"
+    cat <<EOF >> "./${cluster_name}-plan.yaml"
+  - $vm$:
+      nets:
+        - name: ${network_name}
+          type: igb
+          vfio: true
+          noconf: true
+          numa: 0
+        - name: ${sriov_network_name}
+          type: igb
+          mac: $native_mac
+          vfio: true
+          noconf: true
+          numa: 1
+EOF
+    if [[ -n $MOCK_SMARTNIC_REPO ]]; then
+      cat <<EOF >> "./${cluster_name}-plan.yaml"
+        - name: ${sriov_network_name}
+          type: igb
+          mac: $mock_mac
+          vfio: true
+          noconf: true
+          numa: 1
+EOF
+    fi
+    cat <<EOF >> "./${cluster_name}-plan.yaml"
+      numcpus: 6
+      numa:
+        - id: 0
+          vcpus: 0,2,4
+          memory: 2048
+        - id: 1
+          vcpus: 1,3,5
+          memory: 2048
+EOF
+  done
 }
 
 wait_for_cluster_ready() {
@@ -273,12 +285,15 @@ EOF"
 }
 
 update_host() {
-  local node_name=$1
+  local node_name=$1 native_mac=${2:-}
   kcli ssh "$node_name" << EOF
 sudo su
 set -e
 echo '$insecure_registry' > /etc/containers/registries.conf.d/003-internal.conf
 systemctl restart crio
+if [[ -n '$native_mac' ]]; then
+  echo 'SUBSYSTEM=="net", ACTION=="add", ATTR{address}=="$native_mac", NAME="sriovtest0"' > /etc/udev/rules.d/70-sriov-native-test.rules
+fi
 
 mkdir -p /opt/cni/bin
 if command -v curl >/dev/null 2>&1; then
@@ -309,24 +324,27 @@ method=disabled
 NMEOF
 chmod 600 /etc/NetworkManager/system-connections/multi.nmconnection
 
+install -d /usr/local/libexec
+cat > /usr/local/libexec/disable-primary-offload << 'OFFLOAD'
+#!/usr/bin/env bash
+set -euo pipefail
+primary=\$(ip -4 route show default | awk '{print \$5; exit}')
+[[ -n \$primary ]]
+exec ethtool -K "\$primary" rx off tx off gso off
+OFFLOAD
 cat > /etc/systemd/system/disable-offload.service << 'OFFLOADEOF'
 [Unit]
-Description=disable checksum offload to avoid vf bug
-After=network.target
-
+Description=Disable management NIC offload for emulated igb
+Wants=NetworkManager-wait-online.service
+After=NetworkManager-wait-online.service
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/bash -ec "if command -v ethtool >/dev/null 2>&1; then for nic in eth0 eth1; do [ -d \"/sys/class/net/\$nic\" ] || continue; ethtool --offload \"\$nic\" rx off tx off || true; ethtool -K \"\$nic\" gso off || true; done; fi"
-StandardOutput=journal+console
-StandardError=journal+console
-
+ExecStart=/usr/bin/bash /usr/local/libexec/disable-primary-offload
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
 OFFLOADEOF
-
 systemctl daemon-reload
-systemctl enable disable-offload.service
-systemctl start disable-offload.service || true
+systemctl enable --now disable-offload.service
 
 cat > /etc/systemd/system/load-br-netfilter.service << 'BRNFEOF'
 [Unit]
@@ -346,66 +364,12 @@ BRNFEOF
 systemctl daemon-reload
 systemctl enable --now load-br-netfilter
 
-# The mock installer needs zero VFs; it must never take over a management PF.
-if [[ -z '${MOCK_SMARTNIC_REPO}' ]]; then
-cat > /usr/local/bin/create-sriov-vfs.sh << 'VFSCRIPT'
-#!/usr/bin/bash
-set -euo pipefail
-created=0
-for driver_link in /sys/bus/pci/devices/*/driver; do
-  [[ -e "\$driver_link" ]] || continue
-  readlink -f "\$driver_link" | grep -q '/igb\$' || continue
-  pf="\$(dirname "\$driver_link")"
-  addr="\$(basename "\$pf")"
-  [[ -w "\$pf/sriov_numvfs" ]] || continue
-  [[ -r "\$pf/sriov_totalvfs" ]] || continue
-  totalvfs="\$(cat "\$pf/sriov_totalvfs")"
-  [[ "\$totalvfs" -ge 5 ]] || continue
-  echo 0 > "\$pf/sriov_numvfs" || true
-  echo 5 > "\$pf/sriov_numvfs"
-  echo "Created VFs on \$addr"
-  created=\$((created + 1))
-done
-if [[ "\$created" -eq 0 ]]; then
-  echo "error: no igb PF with writable sriov_numvfs and sriov_totalvfs >= 5" >&2
-  exit 1
-fi
-VFSCRIPT
-chmod +x /usr/local/bin/create-sriov-vfs.sh
-
-cat > /etc/systemd/system/create-sriov-vfs.service << 'SRIOVSVCEOF'
-[Unit]
-Description=create sriov vfs
-After=systemd-udevd.service
-Before=network-pre.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-# Needed on SELinux enforcing hosts where init_t may be blocked from sysfs writes.
-SELinuxContext=system_u:system_r:unconfined_service_t:s0
-ExecStart=/usr/local/bin/create-sriov-vfs.sh
-StandardOutput=journal+console
-StandardError=journal+console
-
-[Install]
-WantedBy=network-pre.target
-SRIOVSVCEOF
-
-restorecon /etc/systemd/system/create-sriov-vfs.service || true
-test -s /etc/systemd/system/create-sriov-vfs.service
-systemctl daemon-reload
-systemctl reenable create-sriov-vfs.service
-systemctl start create-sriov-vfs.service || true
-fi
-
 systemctl restart NetworkManager
 
 grubby --update-kernel=DEFAULT --args=pci=realloc
 grubby --update-kernel=DEFAULT --args=iommu=pt
 grubby --update-kernel=DEFAULT --args=intel_iommu=on
 
-if [[ -z '${MOCK_SMARTNIC_REPO}' ]]; then
 cat > /etc/systemd/system/load-vfio.service << 'VFIOEOF'
 [Unit]
 Description=load VFIO modules for DRA VFIO demos
@@ -424,23 +388,25 @@ VFIOEOF
 
 systemctl daemon-reload
 systemctl enable --now load-vfio
-fi
 
 EOF
 }
 
 restart_sriov_host() {
-  if [[ -n $MOCK_SMARTNIC_REPO ]]; then
-    local boot
-    boot=$(timeout 20 kcli ssh "$1" cat /proc/sys/kernel/random/boot_id)
-    [[ $boot =~ ^[0-9a-f-]{36}$ ]] || { echo 'Cannot record host boot ID' >&2; return 1; }
-    MOCK_SMARTNIC_BOOTS[$1]=$boot
-  fi
+  local boot
+  boot=$(timeout 20 kcli ssh "$1" cat /proc/sys/kernel/random/boot_id)
+  [[ $boot =~ ^[0-9a-f-]{36}$ ]] || { echo 'Cannot record host boot ID' >&2; return 1; }
+  MOCK_SMARTNIC_BOOTS[$1]=$boot
   kcli restart vm "$1"
 }
 
 configure_hosts_and_reboot() {
-  update_host "${cluster_name}-ctlplane-0"
+  local native_mac
+  if $SINGLE_NODE; then
+    update_host "${cluster_name}-ctlplane-0" "52:54:00:fa:00:02"
+  else
+    update_host "${cluster_name}-ctlplane-0"
+  fi
 
   # Single-node reboots the control plane VM
   if $SINGLE_NODE; then
@@ -449,109 +415,26 @@ configure_hosts_and_reboot() {
   fi
 
   for ((num=0; num<NUM_OF_WORKERS; num++)); do
-    update_host "${cluster_name}-worker-${num}"
+    printf -v native_mac '52:54:00:fa:%02x:02' "$num"
+    update_host "${cluster_name}-worker-${num}" "$native_mac"
     restart_sriov_host "${cluster_name}-worker-${num}"
   done
 }
 
-# Select the attested secondary NIC; management may also use igb.
-setup_mock_smartnic() {
-  local vm=$1 mac args attempt boot ready=false
-  mac=$(python3 - "$vm" "$sriov_network_name" <<'PYXML'
-import subprocess, sys, xml.etree.ElementTree as ET
-vm, network = sys.argv[1:]
-xml = ET.fromstring(subprocess.check_output(["virsh", "dumpxml", vm]))
-net = ET.fromstring(subprocess.check_output(["virsh", "net-dumpxml", network]))
-if xml.findall("./devices/hostdev") or xml.findall("./devices/interface[@type='hostdev']"):
-    raise SystemExit("Mock workers must not have PCI passthrough")
-bridge = net.find("bridge")
-nics = [nic for nic in xml.findall("./devices/interface")
-        if nic.find("model") is not None and nic.find("model").get("type") == "igb"
-        and nic.find("source") is not None
-        and (nic.find("source").get("network") == network or
-             (bridge is not None and nic.find("source").get("bridge") == bridge.get("name")))]
-if len(nics) != 1:
-    raise SystemExit("Need exactly one emulated igb NIC on the dedicated test network")
-print(nics[0].find("mac").get("address"))
-PYXML
-  ) || return 1
+# Attest both test NICs before provisioning either PCI family.
+setup_sriov_host() {
+  local vm=$1 index=$2 native_mac mock_mac args boot ready=false
   for ((attempt=0; attempt<60; attempt++)); do
     boot=$(timeout 10 kcli ssh "$vm" cat /proc/sys/kernel/random/boot_id) || boot=
     if [[ $boot =~ ^[0-9a-f-]{36}$ && $boot != "${MOCK_SMARTNIC_BOOTS[$vm]}" ]]; then ready=true; break; fi
     sleep 5
   done
-  $ready || { echo "Timed out waiting for $vm SSH" >&2; return 1; }
-  printf -v args '%q ' "$MOCK_SMARTNIC_REPO" "$MOCK_SMARTNIC_REF" "$MOCK_SMARTNIC_KERNEL" "$mac"
-  timeout 900 kcli ssh "$vm" "sudo --preserve-env=SSH_CONNECTION bash -s -- $args" <<'WORKER'
-set -Eeuo pipefail
-repo=$1 ref=$2 kernel=$3 mac=$4
-[[ $(uname -r) == "$kernel" ]] || { echo 'Provision a worker with the pinned kernel before mock setup.' >&2; exit 1; }
-# libvirt MAC attestation maps to exactly one PCI PF; the installer checks usage.
-names=()
-for path in /sys/class/net/*; do
-  [[ $(cat "$path/address") == "$mac" ]] && names+=("$path")
-done
-((${#names[@]} == 1))
-pf=$(basename "$(readlink -f "${names[0]}/device")")
-checkout=/var/tmp/switchdev-mock-driver
-[[ ! -e $checkout ]] || { echo "Refusing to overwrite $checkout" >&2; exit 1; }
-command -v git >/dev/null || dnf install -y git
-git clone -- "$repo" "$checkout"
-git -C "$checkout" checkout --detach "$ref"
-[[ $(git -C "$checkout" rev-parse HEAD) == "$ref" ]]
-# Refuse foreign provisioning state before installing anything.
-[[ ! -e /usr/local/bin/create-sriov-vfs.sh && ! -e /etc/systemd/system/create-sriov-vfs.service && ! -e /etc/systemd/system/kubelet.service.d/31-mock-smartnic-vfs.conf ]]
-"$checkout/scripts/setup-worker.sh" --pf "$pf" --kernel "$kernel" --emulated-pf
-# DRA discovers existing VFs; unlike the SR-IOV operator it does not create them.
-# Keep VF creation after the persisted exact-PF binding, including at boot.
-cat > /usr/local/bin/create-sriov-vfs.sh <<'VFSCRIPT'
-#!/usr/bin/env bash
-set -Eeuo pipefail
-pf=$1
-[[ $pf =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[01][0-9a-f]\.[0-7]$ ]]
-p=/sys/bus/pci/devices/$pf
-[[ $(cat /sys/module/mock_smartnic/parameters/target_pf) == "$pf" ]]
-[[ $(basename "$(readlink -f "$p/driver")") == mock_smartnic_pf ]]
-[[ $(cat "$p/sriov_totalvfs") -ge 5 && $(cat "$p/sriov_drivers_autoprobe") == 1 ]]
-num=$(cat "$p/sriov_numvfs")
-if [[ $num == 0 ]]; then
-  printf '5\n' > "$p/sriov_numvfs"
-else
-  [[ $num == 5 ]] || { echo 'Unexpected VF count; refusing to destroy allocations.' >&2; exit 1; }
-fi
-for index in {0..4}; do
-  vf=$(readlink -f "$p/virtfn$index")
-  [[ $(readlink -f "$vf/physfn") == "$p" ]]
-  [[ $(basename "$(readlink -f "$vf/driver")") == mock_smartnic_vf ]]
-done
-VFSCRIPT
-chmod 755 /usr/local/bin/create-sriov-vfs.sh
-cat > /etc/systemd/system/create-sriov-vfs.service <<VFUNIT
-[Unit]
-Description=Create VFs only on the dedicated mock SmartNIC PF
-Requires=mock-smartnic-lab.service
-After=mock-smartnic-lab.service
-Before=kubelet.service
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/local/bin/create-sriov-vfs.sh $pf
-[Install]
-WantedBy=multi-user.target
-VFUNIT
-cat > /etc/systemd/system/kubelet.service.d/31-mock-smartnic-vfs.conf <<'KUBELET'
-[Unit]
-Requires=create-sriov-vfs.service
-After=create-sriov-vfs.service
-KUBELET
-if command -v restorecon >/dev/null; then
-  restorecon /usr/local/bin/create-sriov-vfs.sh /etc/systemd/system/create-sriov-vfs.service
-fi
-systemctl daemon-reload
-systemctl enable --now create-sriov-vfs.service
-devlink dev eswitch show "pci/$pf"
-echo "Prepared five VFs on $pf; DRA policies manage the eswitch mode."
-WORKER
+  $ready || { echo "Timed out waiting for $vm reboot" >&2; return 1; }
+  printf -v native_mac '52:54:00:fa:%02x:02' "$index"
+  printf -v mock_mac '52:54:00:fa:%02x:03' "$index"
+  python3 "$here/attest-test-nics.py" "$vm" "$sriov_network_name" "$native_mac" "$([[ -n $MOCK_SMARTNIC_REPO ]] && echo "$mock_mac")"
+  printf -v args '%q ' "$MOCK_SMARTNIC_REPO" "$native_mac" "$mock_mac"
+  timeout 900 kcli ssh "$vm" "sudo --preserve-env=SSH_CONNECTION bash -s -- $args" < "$here/setup-sriov-host.sh"
 }
 
 collect_node_diagnostics() {
@@ -721,7 +604,8 @@ deploy_dra_driver() {
   [[ -z $MOCK_SMARTNIC_REPO ]] || mock_values+=(--set kubeletPlugin.ovs.enabled=true)
   "${root}/bin/helm" upgrade -i dra-multi-network deployments/helm/dra-multi-network/ \
     --namespace dra-multi-network --create-namespace \
-    --set "image.repository=${DRIVER_IMAGE}" "${mock_values[@]}"
+    --set "image.repository=${DRIVER_IMAGE}" \
+    --set-json 'kubeletPlugin.nodeSelector={"feature.node.kubernetes.io/network-sriov.capable":"true"}' "${mock_values[@]}"
 }
 
 wait_for_dra_driver_daemonset() {
@@ -801,8 +685,7 @@ verify_vfs_and_restart_driver() {
   done
 
   echo "## restart DRA driver pods so they discover newly created VFs"
-  kubectl -n dra-multi-network delete pod -l app.kubernetes.io/name=dra-multi-network \
-    --force --grace-period=0 || true
+  kubectl -n dra-multi-network rollout restart daemonset/dra-multi-network-kubeletplugin
 
   echo "## wait for DRA driver pod to be ready again"
   sleep 10
@@ -859,14 +742,12 @@ configure_hosts_and_reboot
 echo "## Waiting for nodes to be ready after reboot"
 wait_for_nodes_after_reboot
 
-if [[ -n $MOCK_SMARTNIC_REPO ]]; then
-  if $SINGLE_NODE; then
-    setup_mock_smartnic "${cluster_name}-ctlplane-0"
-  else
-    for ((num=0; num<NUM_OF_WORKERS; num++)); do
-      setup_mock_smartnic "${cluster_name}-worker-${num}"
-    done
-  fi
+if $SINGLE_NODE; then
+  setup_sriov_host "${cluster_name}-ctlplane-0" 0
+else
+  for ((num=0; num<NUM_OF_WORKERS; num++)); do
+    setup_sriov_host "${cluster_name}-worker-${num}" "$num"
+  done
 fi
 
 # Single-node reboots the control plane VM, which can leave a stale cni0 bridge

@@ -183,7 +183,7 @@ func TestAllocationEffectProgram(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(connect.Effects) != 14 || len(connect.Exports) != 6 || connect.Effects[0].ID != "left-attach" {
+			if len(connect.Effects) != 17 || len(connect.Exports) != 9 || connect.Effects[0].ID != "left-attach" {
 				t.Fatalf("incorrect connection: %+v", connect)
 			}
 		})

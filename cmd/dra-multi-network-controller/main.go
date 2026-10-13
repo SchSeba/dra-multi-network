@@ -70,7 +70,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if err := mgr.Add(&ipam.Publisher{Store: ipam.Store{Client: c, Namespace: namespace}, KubeClient: ipamClient}); err != nil {
+	if err := mgr.Add(&ipam.Publisher{Provider: ipam.Store{Client: c, Namespace: namespace}, Client: c, KubeClient: ipamClient}); err != nil {
 		return err
 	}
 	ready := make(chan struct{})

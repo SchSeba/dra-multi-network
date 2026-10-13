@@ -244,30 +244,41 @@ chart-prepare: | $(YQ) ; ## Prepare chart (pass VERSION=v1.0.0 or VERSION=sha)
 chart-push: ## Push chart (pass VERSION=v1.0.0 or VERSION=sha)
 	@VERSION=$(VERSION) GITHUB_TOKEN=$(GITHUB_TOKEN) GITHUB_REPO_OWNER=$(GITHUB_REPO_OWNER) hack/release/chart-push.sh
 
-.PHONY: deploy-virtual-k8s-cluster
-deploy-virtual-k8s-cluster:
-	./hack/deploy-virtual-k8s-cluster.sh
-
-.PHONY: deploy-single-node-virtual-cluster deploy-multi-node-virtual-cluster
+.PHONY: deploy-single-node-virtual-cluster deploy-multi-node-virtual-cluster delete-virtual-k8s-cluster
 deploy-single-node-virtual-cluster:
 	./hack/deploy-virtual-k8s-cluster.sh --single-node
 
-deploy-multi-node-virtual-cluster: deploy-virtual-k8s-cluster
+deploy-multi-node-virtual-cluster:
+	./hack/deploy-virtual-k8s-cluster.sh
 
-# Preserve the existing lab command as an alias.
-deploy-single-node-virtual-cluster-standalone: deploy-single-node-virtual-cluster
-
-.PHONY: undeploy-virtual-k8s-cluster delete-virtual-k8s-cluster
 delete-virtual-k8s-cluster:
 	./hack/deploy-virtual-k8s-cluster.sh --cleanup
-
-undeploy-virtual-k8s-cluster: delete-virtual-k8s-cluster
 
 redeploy-dra-driver-virtual-cluster:
 	./hack/virtual-cluster-redeploy.sh
 
 # Manual integration against an already deployed cluster.
 .PHONY: e2e-workloads
-e2e-workloads:
-	./examples/bond-vlan/apply.sh
-	./test/integration/bond-vlan/test-traffic.sh
+e2e-workloads: deploy-example-bond-ovs
+
+# Apply examples to the existing cluster selected by KUBECONFIG.
+EXAMPLES := single-vf bond-vlan bond-ovs effect-program link-config kernel-rebind reset \
+	shared root-effect-program vf-config vfio ipam ipam-two-vf roce ipoib \
+	switchdev-ovs switchdev-accelerated-bridge
+EXAMPLE_TARGETS := $(addprefix deploy-example-,$(EXAMPLES)) $(addprefix delete-example-,$(EXAMPLES))
+.PHONY: $(EXAMPLE_TARGETS) examples-help
+
+$(filter-out deploy-example-bond-ovs,$(addprefix deploy-example-,$(EXAMPLES))): deploy-example-%:
+	python3 examples/manage.py deploy $*
+
+$(filter-out delete-example-bond-ovs,$(addprefix delete-example-,$(EXAMPLES))): delete-example-%:
+	python3 examples/manage.py delete $*
+
+deploy-example-bond-ovs:
+	./examples/bond-ovs/apply.sh
+
+delete-example-bond-ovs:
+	python3 examples/bond-ovs/cleanup.py
+
+examples-help:
+	@$(foreach example,$(EXAMPLES),echo 'make deploy-example-$(example) / make delete-example-$(example)';)

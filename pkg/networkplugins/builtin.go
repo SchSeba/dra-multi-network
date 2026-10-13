@@ -28,7 +28,7 @@ func Run(call sdk.Request) (sdk.Result, error) {
 		return result, fmt.Errorf("E_PLUGIN_CALL_IDENTITY")
 	}
 	switch call.Plugin {
-	case hostPlugin, sriovPlugin, macvlanPlugin, ipvlanPlugin, "bond-cni", "vlan-cni", "accelerated-bridge-cni", ovsPlugin, "ipam", "address-cni":
+	case hostPlugin, sriovPlugin, macvlanPlugin, ipvlanPlugin, "bond-cni", "vlan-cni", "tuning-cni", "accelerated-bridge-cni", ovsPlugin, "ipam", "address-cni":
 	default:
 		return result, fmt.Errorf("E_PLUGIN_IMPLEMENTATION: %s", call.Plugin)
 	}
@@ -79,6 +79,18 @@ func Run(call sdk.Request) (sdk.Result, error) {
 	}
 	if call.Hook != sdk.ConnectNetwork {
 		return result, fmt.Errorf("E_PLUGIN_HOOK_CONTRACT")
+	}
+	if call.Plugin == "tuning-cni" {
+		if len(call.Inputs[sdk.InterfacePort]) != 1 {
+			return result, fmt.Errorf("E_PLUGIN_PORT_CARDINALITY")
+		}
+		if c.IPv4Forward == nil {
+			return result, fmt.Errorf("E_TUNING_CONFIG: ipv4Forward is required")
+		}
+		id := call.ID + "-forwarding"
+		add(id, sdk.IPv4Forwarding, sdk.Config{IPv4Forward: c.IPv4Forward}, map[string]sdk.EffectRef{sdk.InterfacePort: call.Inputs[sdk.InterfacePort][0]})
+		p.Exports["configured"] = sdk.EffectRef{From: "effects." + id + ".interface"}
+		return result, sdk.ValidateResult(call, result)
 	}
 	if call.Plugin == "address-cni" {
 		if len(call.Inputs["interface"]) != 1 || len(call.Inputs["lease"]) != 1 {

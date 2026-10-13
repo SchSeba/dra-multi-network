@@ -193,6 +193,7 @@ func Builtins() []api.NetworkPlugin {
 	result = append(result, roceProfiles()...)
 	result = append(result, switchdevProfiles(result)...)
 	result = append(result, ibProfiles()...)
+	result = append(result, tuningPlugin())
 	return append(result, ipamPlugins()...)
 }
 func ValidatePlugin(p api.NetworkPlugin) error {

@@ -8,6 +8,12 @@ spec/status fields; generated [CRD schemas](../config/crd/bases) are authoritati
 for defaults, bounds, immutability and CEL rules. `TopologyRootConfiguration` is
 opaque native DeviceClass configuration, not a sixth CRD. See
 [resource translation](admin/resource-translation.md) for generated native objects.
+The [gRPC plugin/provider guide](grpc-plugins.md) contains proposed future
+deployment/configuration examples; `GRPC` implementations and endpoint fields
+are not part of the current CRD schema. The target includes vendor validation and
+node-local native execution without core opcode handlers; it requires a new
+execution protocol beyond the current pure planning SDK. This reference describes
+implemented fields only.
 
 ## CRD scope and ownership
 
@@ -383,6 +389,28 @@ Ports:
 | outputs | `interface` | `KernelInterface/v1` / ethernet | 1–1 | Exclusive |
 
 Allowed effects: `linux/create-vlan/v1`, `linux/link-configure/v1`.
+
+### `tuning-cni`
+
+Kind: `Operation`; implementation: `tuning-cni`; version: `v1`.
+
+| Config key | Required | Type / constraints |
+|---|---|---|
+| `ipv4Forward` | yes | boolean; true enables, false disables |
+
+Ports:
+
+| Direction | Name | Type / link | Cardinality | Access / ownership |
+|---|---|---|---|---|
+| inputs | `interface` | `KernelInterface/v1` / ethernet | 1–1 | Owned |
+| outputs | `configured` | `KernelInterface/v1` / ethernet | 1–1 | Exclusive |
+
+Allowed effects: `linux/ipv4-forwarding/v1`.
+The effect sets only `net.ipv4.conf.<owned interface>.forwarding` in the sandbox.
+Its payload contains the required `ipv4Forward` boolean and one `interface`
+reference. Arbitrary sysctl keys, interface names and host namespace targets are
+not accepted. The framework journals the old value, checks read-back and restores
+it before link cleanup. The namespace-wide `net.ipv4.ip_forward` is unchanged.
 
 ### `macvlan-cni`
 

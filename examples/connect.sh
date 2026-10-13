@@ -8,6 +8,7 @@ if [[ $# != 2 ]]; then
 fi
 topology=$1
 pod=$2
+namespace=${DRA_EXAMPLE_NAMESPACE:-multi-network-example}
 generation=$(kubectl get networktopology "$topology" -o jsonpath='{.metadata.generation}')
 kubectl wait --for="jsonpath={.status.observedGeneration}=$generation" "networktopology/$topology" --timeout=120s
 kubectl wait --for=condition=Ready "networktopology/$topology" --timeout=120s
@@ -18,7 +19,7 @@ if [[ $(wc -l <<< "$roots") != 1 ]]; then
 fi
 class=$(kubectl get networktopology "$topology" -o jsonpath='{.status.rootClasses[0].className}')
 revision=$(kubectl get networktopology "$topology" -o jsonpath='{.status.revisionRef.digest}')
-kubectl create namespace multi-network-example --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace "$namespace" --dry-run=client -o yaml | kubectl apply -f -
 sed -e "s/ROOT_CLASS/$class/" -e "s/CLAIM_TEMPLATE/${topology}-${revision:0:16}/g" \
-    -e "s/POD_NAME/$pod/" "$repo_dir/examples/single-vf/workload.yaml" | kubectl apply -f -
-kubectl -n multi-network-example wait --for=condition=Ready "pod/$pod" --timeout=180s
+    -e "s/POD_NAME/$pod/" -e "s/multi-network-example/$namespace/g" "$repo_dir/examples/single-vf/workload.yaml" | kubectl apply -f -
+kubectl -n "$namespace" wait --for=condition=Ready "pod/$pod" --timeout=180s

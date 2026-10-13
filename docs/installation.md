@@ -108,17 +108,21 @@ On a dedicated Linux virtualization host with kcli, libvirt/KVM and the required
 network/image access:
 
 ```bash
-make deploy-single-node-virtual-cluster-standalone
+make deploy-single-node-virtual-cluster
+# Or: make deploy-multi-node-virtual-cluster
 export KUBECONFIG="$HOME/.kcli/clusters/multi-network/auth/kubeconfig"
 make redeploy-dra-driver-virtual-cluster
 make e2e-workloads
 ```
 
-The `standalone` suffix is a compatibility target alias; the project has one
-internal MVP mode. The lab uses CRI-O, Flannel and Kubernetes 1.37. Defaults are
+The two deployment targets use the same provisioning script. The lab uses
+CRI-O, Flannel and Kubernetes 1.37. Defaults are
 cluster `multi-network`, management network `multi-net` (`192.168.130.0/24`),
 secondary network `multi-sriov` (`192.168.210.0/24`), Pod CIDR `10.246.0.0/16` and
 service CIDR `10.112.0.0/16`. Environment overrides are listed by
 `hack/deploy-virtual-k8s-cluster.sh --help`. Provisioning creates/updates lab VMs;
 use it only on the intended virtualization host. Verification remains a separate
-manual step. `test/integration` is never run as a Helm installation hook.
+manual step. `make e2e-workloads` runs the
+[combined native bond/OVS example](../examples/bond-ovs/README.md) on every
+workload node. Each has separate native igb and compiled mock switchdev test
+NICs. `test/integration` is never run as a Helm installation hook.

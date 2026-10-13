@@ -38,13 +38,14 @@ when changing the public API.
 | `pkg/controller`, `pkg/admission` | Compilation, retention, capability placement and API boundaries |
 | `pkg/multinetwork` | Inventory/publication, DRA preparation, NRI and administrative management |
 | `pkg/pluginapi`, `pkg/networkplugins` | Serializable SDK and pure internal planners |
+| `pkg/ipam` | Serializable provider interface, local ConfigMap backend, IPAM DRA driver and capacity publisher |
 | `pkg/topology` | Canonical schemas, DAG validation, template binding and plan validation |
 | `pkg/effects`, `pkg/journal` | Native effects, physical ownership and durable recovery |
 | `pkg/discovery`, `pkg/host`, `pkg/cdi` | Reused discovery/host helpers and scoped CDI |
 | `deployments` | Image, Helm and host-runtime configuration |
 | `examples`, `test/integration` | Public manifests and manual live regression |
 
-## Plugin changes
+## Current POC plugin changes
 
 Read the [SDK boundary](../pkg/pluginapi/README.md) before implementing a planner.
 Do not import Kubernetes, DRA, netlink, OVSDB or journal code into plugin packages.
@@ -54,6 +55,23 @@ restoration of the recorded original hook; it does not plan new deletion targets
 Tests cover dependency isolation, JSON serialization, profile/config/composition
 validation and meaningful native recovery/ownership behavior. GA gRPC services
 are future work; no transport scaffolding is needed to edit a POC planner.
+
+The production target externalizes native execution as well as planning. Vendor
+node plugins may use Linux/OVS/vendor APIs within operator-approved grants and
+privileges; the POC planner import restriction is not the future executor model.
+Production compiler/dispatch must be descriptor-driven rather than plugin-name or
+core-opcode switches. Generic protocol/grant changes belong in core; new supported
+vendor network operations and their restoration belong in the external plugin.
+The execution SDK, durable receipts/replay, namespace delegation and coordinated
+recovery must be designed before replacing current native paths.
+
+IPAM callers use `ipam.Provider`; the current implementation is `ipam.Store`.
+Keep Kubernetes entitlement verification in the driver and backend operations
+behind the serializable provider methods. Read the
+[plugin owner and gRPC guide](grpc-plugins.md) for the implemented call points,
+future wire protocol, service deployment, NetworkPlugin examples and production
+acceptance requirements. Its proposed `GRPC` fields are not supported by current
+CRDs; developing a builtin today still uses ordinary Go calls.
 
 ## Test a live build
 
