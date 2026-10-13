@@ -1,0 +1,1764 @@
+# Reference: the DRA driver's controller automatically installs these builtin NetworkPlugins.
+# See README.md; this file does not need to be applied separately.
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: accelerated-bridge-cni
+spec:
+  allowedEffects:
+  - linux/representor-bridge/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      bridge:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      trunk:
+        items:
+          maximum: 4094
+          minimum: 1
+          type: integer
+        maxItems: 4094
+        type: array
+        uniqueItems: true
+      up:
+        type: boolean
+      vlanId:
+        maximum: 4094
+        minimum: 0
+        type: integer
+    required:
+    - bridge
+    - mtu
+    - up
+    - vlanId
+    type: object
+  implementation:
+    name: accelerated-bridge-cni
+    type: Builtin
+    version: v1
+  inputs:
+    representor:
+      access: ExclusiveMaster
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      type: HostRepresentor/v1
+  kind: Operation
+  outputs:
+    representor:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: HostRepresentor/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: accelerated-bridge-cni-uplink
+spec:
+  allowedEffects:
+  - linux/shared-uplink-vlan/v1
+  - linux/representor-bridge/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      bridge:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      trunk:
+        items:
+          maximum: 4094
+          minimum: 1
+          type: integer
+        maxItems: 4094
+        type: array
+        uniqueItems: true
+      up:
+        type: boolean
+      uplink:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      vlanId:
+        maximum: 4094
+        minimum: 0
+        type: integer
+    required:
+    - bridge
+    - mtu
+    - up
+    - vlanId
+    - uplink
+    type: object
+  implementation:
+    name: accelerated-bridge-cni
+    type: Builtin
+    version: v1
+  inputs:
+    representor:
+      access: ExclusiveMaster
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      type: HostRepresentor/v1
+  kind: Operation
+  outputs:
+    representor:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: HostRepresentor/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: address-cni
+spec:
+  allowedEffects:
+  - linux/address-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties: {}
+    required: null
+    type: object
+  implementation:
+    name: address-cni
+    type: Builtin
+    version: v1
+  inputs:
+    interface:
+      access: Owned
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      type: KernelInterface/v1
+    lease:
+      access: Lease
+      maxItems: 1
+      minItems: 1
+      type: AddressLease/v2
+  kind: Operation
+  outputs:
+    configured:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: bond-cni
+spec:
+  allowedEffects:
+  - linux/create-bond/v1
+  - linux/attach-master/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      failOverMac:
+        enum:
+        - active
+        type: string
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      mode:
+        enum:
+        - active-backup
+        type: string
+      monitorIntervalMs:
+        maximum: 10000
+        minimum: 1
+        type: integer
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      up:
+        type: boolean
+    required:
+    - ifName
+    - mtu
+    - up
+    - mode
+    - monitorIntervalMs
+    - failOverMac
+    type: object
+  implementation:
+    name: bond-cni
+    type: Builtin
+    version: v1
+  inputs:
+    members:
+      access: ExclusiveMaster
+      linkType: ethernet
+      maxItems: 8
+      minItems: 2
+      type: KernelInterface/v1
+  kind: Operation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: host-cni
+spec:
+  allowedEffects:
+  - linux/link-move/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - kernel
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      rdmaAccess:
+        enum:
+        - false
+        type: boolean
+      up:
+        type: boolean
+    required:
+    - ifName
+    - mtu
+    - up
+    - mode
+    - linkType
+    - rdmaAccess
+    type: object
+  implementation:
+    name: host-cni
+    type: Builtin
+    version: v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: host-cni-ib-verbs
+spec:
+  allowedEffects:
+  - linux/rdma-namespace/v1
+  - runtime/device-access/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      accessBackend:
+        enum:
+        - nri
+        type: string
+      linkType:
+        enum:
+        - infiniband
+        type: string
+      madAccess:
+        type: boolean
+      mode:
+        enum:
+        - rdma
+        type: string
+      rdmaAccess:
+        enum:
+        - true
+        type: boolean
+      rdmaProfile:
+        enum:
+        - ib-verbs-single-port-v1
+        type: string
+    required:
+    - mode
+    - linkType
+    - rdmaAccess
+    - rdmaProfile
+    - accessBackend
+    type: object
+  implementation:
+    name: host-cni
+    type: Builtin
+    version: ib-verbs-single-port-v1
+  kind: Allocation
+  outputs:
+    rdma:
+      linkType: infiniband
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: RDMADevice/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: host-cni-ipoib
+spec:
+  allowedEffects:
+  - linux/rdma-namespace/v1
+  - runtime/device-access/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      accessBackend:
+        enum:
+        - nri
+        type: string
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - infiniband
+        type: string
+      madAccess:
+        type: boolean
+      mode:
+        enum:
+        - rdma
+        type: string
+      mtu:
+        maximum: 65520
+        minimum: 256
+        type: integer
+      rdmaAccess:
+        enum:
+        - true
+        type: boolean
+      rdmaProfile:
+        enum:
+        - ib-ipoib-single-port-v1
+        type: string
+      up:
+        type: boolean
+    required:
+    - mode
+    - linkType
+    - rdmaAccess
+    - rdmaProfile
+    - accessBackend
+    - ifName
+    - mtu
+    - up
+    type: object
+  implementation:
+    name: host-cni
+    type: Builtin
+    version: ib-ipoib-single-port-v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: infiniband
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+    rdma:
+      linkType: infiniband
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: RDMADevice/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: host-cni-rebind
+spec:
+  allowedEffects:
+  - linux/driver-bind/v1
+  - linux/link-move/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      driver:
+        pattern: ^[A-Za-z0-9_-]{1,64}$
+        type: string
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - kernel
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      rdmaAccess:
+        enum:
+        - false
+        type: boolean
+      up:
+        type: boolean
+    required:
+    - mode
+    - linkType
+    - rdmaAccess
+    - driver
+    - ifName
+    - mtu
+    - up
+    type: object
+  implementation:
+    name: host-cni
+    type: Builtin
+    version: kernel-bind-v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: host-cni-reset
+spec:
+  allowedEffects:
+  - linux/pci-reset/v1
+  - linux/driver-bind/v1
+  - linux/link-move/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      driver:
+        pattern: ^[A-Za-z0-9_-]{1,64}$
+        type: string
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - kernel
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      rdmaAccess:
+        enum:
+        - false
+        type: boolean
+      resetMethod:
+        enum:
+        - flr
+        type: string
+      up:
+        type: boolean
+    required:
+    - mode
+    - linkType
+    - rdmaAccess
+    - driver
+    - ifName
+    - mtu
+    - up
+    - resetMethod
+    type: object
+  implementation:
+    name: host-cni
+    type: Builtin
+    version: kernel-reset-v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: host-cni-roce
+spec:
+  allowedEffects:
+  - linux/rdma-namespace/v1
+  - runtime/device-access/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      accessBackend:
+        enum:
+        - nri
+        type: string
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - rdma
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      rdmaAccess:
+        enum:
+        - true
+        type: boolean
+      rdmaProfile:
+        enum:
+        - roce-single-port-v1
+        type: string
+      up:
+        type: boolean
+    required:
+    - mode
+    - linkType
+    - rdmaAccess
+    - rdmaProfile
+    - accessBackend
+    - ifName
+    - mtu
+    - up
+    type: object
+  implementation:
+    name: host-cni
+    type: Builtin
+    version: roce-single-port-v1
+  kind: Allocation
+  outputs:
+    rdma:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: RDMADevice/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: host-cni-vfio
+spec:
+  allowedEffects:
+  - linux/driver-bind/v1
+  - runtime/device-access/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      accessBackend:
+        enum:
+        - cdi
+        type: string
+      driver:
+        enum:
+        - vfio-pci
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - vfio
+        type: string
+    required:
+    - mode
+    - linkType
+    - driver
+    - accessBackend
+    type: object
+  implementation:
+    name: host-cni
+    type: Builtin
+    version: vfio-v1
+  kind: Allocation
+  outputs:
+    vfio:
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: VFIODevice/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: ipam
+spec:
+  allocationDriver: ipam.schseba.github.io
+  allowedEffects: []
+  configSchema:
+    additionalProperties: false
+    properties:
+      network:
+        type: string
+      subnet:
+        type: string
+    required:
+    - network
+    - subnet
+    type: object
+  implementation:
+    name: ipam
+    type: Builtin
+    version: v1
+  kind: Allocation
+  outputs:
+    lease:
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: AddressLease/v2
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: ipvlan-cni
+spec:
+  allowedEffects:
+  - linux/create-ipvlan/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - l2
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      up:
+        type: boolean
+    required:
+    - ifName
+    - mtu
+    - up
+    - mode
+    - linkType
+    type: object
+  implementation:
+    name: ipvlan-cni
+    type: Builtin
+    version: v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Created
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: macvlan-cni
+spec:
+  allowedEffects:
+  - linux/create-macvlan/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - bridge
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      up:
+        type: boolean
+    required:
+    - ifName
+    - mtu
+    - up
+    - mode
+    - linkType
+    type: object
+  implementation:
+    name: macvlan-cni
+    type: Builtin
+    version: v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Created
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: ovs-cni
+spec:
+  allowedEffects:
+  - ovs/representor-port/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      bridge:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      trunk:
+        items:
+          maximum: 4094
+          minimum: 1
+          type: integer
+        maxItems: 4094
+        type: array
+        uniqueItems: true
+      up:
+        type: boolean
+      vlanId:
+        maximum: 4094
+        minimum: 0
+        type: integer
+    required:
+    - bridge
+    - mtu
+    - up
+    - vlanId
+    type: object
+  implementation:
+    name: ovs-cni
+    type: Builtin
+    version: v1
+  inputs:
+    representor:
+      access: ExclusiveMaster
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      type: HostRepresentor/v1
+  kind: Operation
+  outputs:
+    representor:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: HostRepresentor/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: sriov-cni
+spec:
+  allowedEffects:
+  - linux/link-move/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - kernel
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      rdmaAccess:
+        enum:
+        - false
+        type: boolean
+      up:
+        type: boolean
+    required:
+    - ifName
+    - mtu
+    - up
+    - mode
+    - linkType
+    - rdmaAccess
+    type: object
+  implementation:
+    name: sriov-cni
+    type: Builtin
+    version: v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: sriov-cni-configured
+spec:
+  allowedEffects:
+  - linux/vf-configure/v1
+  - linux/link-move/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - kernel
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      rdmaAccess:
+        enum:
+        - false
+        type: boolean
+      up:
+        type: boolean
+      vf:
+        additionalProperties: false
+        minProperties: 1
+        properties:
+          linkState:
+            enum:
+            - auto
+            - enable
+            - disable
+            type: string
+          mac:
+            pattern: ^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$
+            type: string
+          maxTxRate:
+            maximum: 1000000
+            minimum: 0
+            type: integer
+          minTxRate:
+            maximum: 1000000
+            minimum: 0
+            type: integer
+          spoofCheck:
+            type: boolean
+          trust:
+            type: boolean
+          vlanId:
+            maximum: 4094
+            minimum: 0
+            type: integer
+          vlanProtocol:
+            enum:
+            - 802.1Q
+            - 802.1ad
+            type: string
+          vlanQoS:
+            maximum: 7
+            minimum: 0
+            type: integer
+        type: object
+    required:
+    - ifName
+    - mtu
+    - up
+    - mode
+    - linkType
+    - rdmaAccess
+    - vf
+    type: object
+  implementation:
+    name: sriov-cni
+    type: Builtin
+    version: vf-config-v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: sriov-cni-ib-verbs
+spec:
+  allowedEffects:
+  - linux/rdma-namespace/v1
+  - runtime/device-access/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      accessBackend:
+        enum:
+        - nri
+        type: string
+      linkType:
+        enum:
+        - infiniband
+        type: string
+      madAccess:
+        type: boolean
+      mode:
+        enum:
+        - rdma
+        type: string
+      rdmaAccess:
+        enum:
+        - true
+        type: boolean
+      rdmaProfile:
+        enum:
+        - ib-verbs-single-port-v1
+        type: string
+    required:
+    - mode
+    - linkType
+    - rdmaAccess
+    - rdmaProfile
+    - accessBackend
+    type: object
+  implementation:
+    name: sriov-cni
+    type: Builtin
+    version: ib-verbs-single-port-v1
+  kind: Allocation
+  outputs:
+    rdma:
+      linkType: infiniband
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: RDMADevice/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: sriov-cni-ipoib
+spec:
+  allowedEffects:
+  - linux/rdma-namespace/v1
+  - runtime/device-access/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      accessBackend:
+        enum:
+        - nri
+        type: string
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - infiniband
+        type: string
+      madAccess:
+        type: boolean
+      mode:
+        enum:
+        - rdma
+        type: string
+      mtu:
+        maximum: 65520
+        minimum: 256
+        type: integer
+      rdmaAccess:
+        enum:
+        - true
+        type: boolean
+      rdmaProfile:
+        enum:
+        - ib-ipoib-single-port-v1
+        type: string
+      up:
+        type: boolean
+    required:
+    - mode
+    - linkType
+    - rdmaAccess
+    - rdmaProfile
+    - accessBackend
+    - ifName
+    - mtu
+    - up
+    type: object
+  implementation:
+    name: sriov-cni
+    type: Builtin
+    version: ib-ipoib-single-port-v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: infiniband
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+    rdma:
+      linkType: infiniband
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: RDMADevice/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: sriov-cni-rebind
+spec:
+  allowedEffects:
+  - linux/driver-bind/v1
+  - linux/link-move/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      driver:
+        pattern: ^[A-Za-z0-9_-]{1,64}$
+        type: string
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - kernel
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      rdmaAccess:
+        enum:
+        - false
+        type: boolean
+      up:
+        type: boolean
+    required:
+    - mode
+    - linkType
+    - rdmaAccess
+    - driver
+    - ifName
+    - mtu
+    - up
+    type: object
+  implementation:
+    name: sriov-cni
+    type: Builtin
+    version: kernel-bind-v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: sriov-cni-reset
+spec:
+  allowedEffects:
+  - linux/pci-reset/v1
+  - linux/driver-bind/v1
+  - linux/link-move/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      driver:
+        pattern: ^[A-Za-z0-9_-]{1,64}$
+        type: string
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - kernel
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      rdmaAccess:
+        enum:
+        - false
+        type: boolean
+      resetMethod:
+        enum:
+        - flr
+        type: string
+      up:
+        type: boolean
+    required:
+    - mode
+    - linkType
+    - rdmaAccess
+    - driver
+    - ifName
+    - mtu
+    - up
+    - resetMethod
+    type: object
+  implementation:
+    name: sriov-cni
+    type: Builtin
+    version: kernel-reset-v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: sriov-cni-roce
+spec:
+  allowedEffects:
+  - linux/rdma-namespace/v1
+  - runtime/device-access/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      accessBackend:
+        enum:
+        - nri
+        type: string
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - rdma
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      rdmaAccess:
+        enum:
+        - true
+        type: boolean
+      rdmaProfile:
+        enum:
+        - roce-single-port-v1
+        type: string
+      up:
+        type: boolean
+    required:
+    - mode
+    - linkType
+    - rdmaAccess
+    - rdmaProfile
+    - accessBackend
+    - ifName
+    - mtu
+    - up
+    type: object
+  implementation:
+    name: sriov-cni
+    type: Builtin
+    version: roce-single-port-v1
+  kind: Allocation
+  outputs:
+    rdma:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: RDMADevice/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: sriov-cni-roce-switchdev
+spec:
+  allowedEffects:
+  - linux/representor-map/v1
+  - linux/rdma-namespace/v1
+  - runtime/device-access/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      accessBackend:
+        enum:
+        - nri
+        type: string
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - rdma
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      rdmaAccess:
+        enum:
+        - true
+        type: boolean
+      rdmaProfile:
+        enum:
+        - roce-single-port-v1
+        type: string
+      representor:
+        enum:
+        - true
+        type: boolean
+      up:
+        type: boolean
+    required:
+    - mode
+    - linkType
+    - rdmaAccess
+    - rdmaProfile
+    - accessBackend
+    - ifName
+    - mtu
+    - up
+    - representor
+    type: object
+  implementation:
+    name: sriov-cni
+    type: Builtin
+    version: roce-single-port-v1
+  kind: Allocation
+  outputs:
+    rdma:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: RDMADevice/v1
+    representor:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: HostRepresentor/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: sriov-cni-switchdev
+spec:
+  allowedEffects:
+  - linux/representor-map/v1
+  - linux/link-move/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - kernel
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      rdmaAccess:
+        enum:
+        - false
+        type: boolean
+      representor:
+        enum:
+        - true
+        type: boolean
+      up:
+        type: boolean
+    required:
+    - ifName
+    - mtu
+    - up
+    - mode
+    - linkType
+    - rdmaAccess
+    - representor
+    type: object
+  implementation:
+    name: sriov-cni
+    type: Builtin
+    version: switchdev-v1
+  kind: Allocation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+    representor:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: HostRepresentor/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: sriov-cni-vfio
+spec:
+  allowedEffects:
+  - linux/driver-bind/v1
+  - runtime/device-access/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      accessBackend:
+        enum:
+        - cdi
+        type: string
+      driver:
+        enum:
+        - vfio-pci
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - vfio
+        type: string
+    required:
+    - mode
+    - linkType
+    - driver
+    - accessBackend
+    type: object
+  implementation:
+    name: sriov-cni
+    type: Builtin
+    version: vfio-v1
+  kind: Allocation
+  outputs:
+    vfio:
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: VFIODevice/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: sriov-cni-vfio-configured
+spec:
+  allowedEffects:
+  - linux/vf-configure/v1
+  - linux/driver-bind/v1
+  - runtime/device-access/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      accessBackend:
+        enum:
+        - cdi
+        type: string
+      driver:
+        enum:
+        - vfio-pci
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - vfio
+        type: string
+      vf:
+        additionalProperties: false
+        minProperties: 1
+        properties:
+          linkState:
+            enum:
+            - auto
+            - enable
+            - disable
+            type: string
+          mac:
+            pattern: ^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$
+            type: string
+          maxTxRate:
+            maximum: 1000000
+            minimum: 0
+            type: integer
+          minTxRate:
+            maximum: 1000000
+            minimum: 0
+            type: integer
+          spoofCheck:
+            type: boolean
+          trust:
+            type: boolean
+          vlanId:
+            maximum: 4094
+            minimum: 0
+            type: integer
+          vlanProtocol:
+            enum:
+            - 802.1Q
+            - 802.1ad
+            type: string
+          vlanQoS:
+            maximum: 7
+            minimum: 0
+            type: integer
+        type: object
+    required:
+    - mode
+    - linkType
+    - driver
+    - accessBackend
+    - vf
+    type: object
+  implementation:
+    name: sriov-cni
+    type: Builtin
+    version: vf-config-v1
+  kind: Allocation
+  outputs:
+    vfio:
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: VFIODevice/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: sriov-cni-vfio-switchdev
+spec:
+  allowedEffects:
+  - linux/representor-map/v1
+  - linux/driver-bind/v1
+  - runtime/device-access/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      accessBackend:
+        enum:
+        - cdi
+        type: string
+      driver:
+        enum:
+        - vfio-pci
+        type: string
+      linkType:
+        enum:
+        - ethernet
+        type: string
+      mode:
+        enum:
+        - vfio
+        type: string
+      representor:
+        enum:
+        - true
+        type: boolean
+    required:
+    - mode
+    - linkType
+    - driver
+    - accessBackend
+    - representor
+    type: object
+  implementation:
+    name: sriov-cni
+    type: Builtin
+    version: switchdev-v1
+  kind: Allocation
+  outputs:
+    representor:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: HostRepresentor/v1
+    vfio:
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: VFIODevice/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: tuning-cni
+spec:
+  allowedEffects:
+  - linux/ipv4-forwarding/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      ipv4Forward:
+        type: boolean
+    required:
+    - ipv4Forward
+    type: object
+  implementation:
+    name: tuning-cni
+    type: Builtin
+    version: v1
+  inputs:
+    interface:
+      access: Owned
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      type: KernelInterface/v1
+  kind: Operation
+  outputs:
+    configured:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1
+---
+apiVersion: networking.dra-multi-network.schseba.github.io/v1alpha1
+kind: NetworkPlugin
+metadata:
+  name: vlan-cni
+spec:
+  allowedEffects:
+  - linux/create-vlan/v1
+  - linux/link-configure/v1
+  configSchema:
+    additionalProperties: false
+    properties:
+      ifName:
+        pattern: ^[A-Za-z0-9_.-]{1,15}$
+        type: string
+      mtu:
+        maximum: 9000
+        minimum: 576
+        type: integer
+      up:
+        type: boolean
+      vlanId:
+        maximum: 4094
+        minimum: 1
+        type: integer
+    required:
+    - ifName
+    - mtu
+    - up
+    - vlanId
+    type: object
+  implementation:
+    name: vlan-cni
+    type: Builtin
+    version: v1
+  inputs:
+    parent:
+      access: CreateChild
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      type: KernelInterface/v1
+  kind: Operation
+  outputs:
+    interface:
+      linkType: ethernet
+      maxItems: 1
+      minItems: 1
+      ownership: Exclusive
+      type: KernelInterface/v1
+  stateContract:
+    cleanup: RecordedEffects
+    version: v1

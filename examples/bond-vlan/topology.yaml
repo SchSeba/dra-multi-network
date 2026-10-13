@@ -10,6 +10,7 @@ spec:
     - linux/create-bond/v1
     - linux/attach-master/v1
     - linux/create-vlan/v1
+    - linux/ipv4-forwarding/v1
   steps:
   - id: left
     kind: Allocation
@@ -47,3 +48,21 @@ spec:
     inputs:
       parent: {from: uplink.interface}
     config: {ifName: tenant300, mtu: 1500, up: true, vlanId: 300}
+  - id: tune100
+    kind: Operation
+    pluginRef: {name: tuning-cni}
+    inputs:
+      interface: {from: tenant100.interface}
+    config: {ipv4Forward: true}
+  - id: tune200
+    kind: Operation
+    pluginRef: {name: tuning-cni}
+    inputs:
+      interface: {from: tenant200.interface}
+    config: {ipv4Forward: true}
+  - id: tune300
+    kind: Operation
+    pluginRef: {name: tuning-cni}
+    inputs:
+      interface: {from: tenant300.interface}
+    config: {ipv4Forward: true}

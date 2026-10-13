@@ -47,6 +47,9 @@ write the journal. `pkg/topology` validates and binds their results, and
 framework executor. There is no internal gRPC or external plugin process in the
 POC. GA will move every planner behind gRPC without transferring framework
 ownership; the transport implementation remains future work.
+The [production gRPC guide](grpc-plugins.md) maps the call boundaries and shows
+how plugin owners package, register and deploy services without moving native
+execution or journals out of the framework.
 
 ## State and identity
 
@@ -87,3 +90,11 @@ in a protected, persistent ConfigMap ledger; NRI acquires attachment holders and
 executes recorded address effects before containers start. Cleanup removes owned
 address use before releasing holders. DRA capacity and concrete address ownership
 remain separate accounting layers. See [IPAM](ipam-plan.md) and its examples.
+
+The IPAM driver, node attachment lifecycle and controller inventory publisher
+call `ipam.Provider`. Its local `ipam.Store` implementation owns the protected
+ledger; requests and pool/lease results are serializable values. Kubernetes
+claim verification and DRA publication remain with callers. Production uses a
+separate gRPC IPAM provider service, alongside the pure IPAM/address planner
+services; the provider's durable storage and method authorization are distinct
+from the planner contract.

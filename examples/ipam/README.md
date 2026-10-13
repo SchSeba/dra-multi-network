@@ -6,6 +6,10 @@ capacity, reserves a concrete IP during DRA preparation, and the address step
 applies it before init/application containers start. Each instance has its own
 claim and address. The [design](../../docs/ipam-plan.md) explains ownership,
 backend persistence and failure behavior.
+The backend is called through `ipam.Provider` with a local ConfigMap Store today.
+The [production gRPC guide](../../docs/grpc-plugins.md) explains the future remote
+provider/planner services and their deployment; these runnable manifests use
+the implemented local backend.
 
 Install the [driver](../../docs/installation.md) and set `KUBECONFIG`. Use a
 **dedicated secondary PF** at `0000:29:00.0`, with its host link administratively

@@ -11,18 +11,26 @@ DeviceClasses, ResourceSlices, clientsets, namespace paths or journal handles.
 | `pluginapi` | Serializable configuration, opaque references, effects, four lifecycle hook names and response-scope checks |
 
 MVP builtin planners live in `pkg/networkplugins` and execute through ordinary
-Go calls. All plugin families, including OVS, accelerated bridge and the IPAM/address planners,
+Go calls. All plugin families, including tuning, OVS, accelerated bridge and the IPAM/address planners,
 use this boundary. `pkg/topology/plan.go` binds inputs and validates results. CRD effect
 templates remain declarative framework compilation; they cannot become new
 physical authority. Native execution and recorded compensation stay behind the
 framework's grant and journal checks.
 
-GA moves **all plugin implementations**, including OVS, accelerated bridge and the IPAM/address planners,
+GA moves **all plugin implementations**, including tuning, OVS, accelerated bridge and the IPAM/address planners,
 outside the DRA process behind gRPC. The same request/result contract is used;
 changing transport does not transfer DRA publication, admission, journal or
 allocation authority to a plugin. A remote result still passes scope, schema,
 descriptor, budget and live ownership checks before execution. The GA adapter
 and plugin services are future work; MVP does not add gRPC scaffolding.
+
+IPAM's stateful backend uses a separate [`ipam.Provider`](../ipam/provider.go)
+interface for inventory, reservations, lookup, attachment holders and release.
+The POC injects the local ConfigMap Store; production will inject a gRPC client.
+These calls are not planner hooks: IPAM/address planners remain pure and never
+get backend storage credentials. The [production guide](../../docs/grpc-plugins.md)
+covers both RPC boundaries, plugin-owner responsibilities, proposed NetworkPlugin
+configuration, deployments and compatibility requirements.
 
 The four hooks are `NodePrepare`, `ConnectNetwork`, `RemoveNetwork` and
 `NodeUnprepare`. Cleanup identifies the framework-owned original execution and
@@ -36,3 +44,9 @@ planning again. A dependency test prevents either plugin package from importing 
 Kubernetes, netlink, runtime or journal code. The OVSDB client belongs only to
 the framework's native executor. A JSON round-trip check covers all four hooks
 for every builtin family.
+
+The `tuning-cni` planner consumes one granted `interface` reference and the
+required boolean `ipv4Forward`. It returns a `linux/ipv4-forwarding/v1` effect
+and a `configured` observation. Interface lookup, entering the sandbox namespace,
+sysctl mutation/read-back and restoring the journaled before-image belong to the
+framework; no paths or Linux handles cross the plugin boundary.

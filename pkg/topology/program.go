@@ -48,9 +48,15 @@ func ValidateProgram(p EffectProgram, budget []string) error {
 			return fmt.Errorf("E_EFFECT_DENIED: %s", e.Kind)
 		}
 		switch e.Kind {
-		case Move, Configure, CreateBond, AttachMaster, CreateVLAN, CreateMacvlan, CreateIPvlan, DriverBind, DeviceAccess, VFConfigure, PCIReset, RDMANamespace, RepresentorMap, BridgeConfigure, OVSConfigure, UplinkConfigure, AddressConfigure:
+		case Move, Configure, CreateBond, AttachMaster, CreateVLAN, CreateMacvlan, CreateIPvlan, DriverBind, DeviceAccess, VFConfigure, PCIReset, RDMANamespace, RepresentorMap, BridgeConfigure, OVSConfigure, UplinkConfigure, AddressConfigure, IPv4Forwarding:
 		default:
 			return fmt.Errorf("E_EFFECT_OPCODE: %s", e.Kind)
+		}
+		if e.Kind == IPv4Forwarding && (len(e.Inputs) != 1 || e.Inputs[InterfacePort].From == "" || e.Parameters.IPv4Forward == nil || Digest(e.Parameters) != Digest(Config{IPv4Forward: e.Parameters.IPv4Forward})) {
+			return fmt.Errorf("E_TUNING_PAYLOAD")
+		}
+		if e.Parameters.IPv4Forward != nil && e.Kind != IPv4Forwarding {
+			return fmt.Errorf("E_TUNING_OPCODE: ipv4Forward requires ipv4-forwarding")
 		}
 		if e.Kind == AddressConfigure && (len(e.Inputs) != 2 || e.Inputs[InterfacePort].From == "" || e.Inputs[LeasePort].From == "" || Digest(e.Parameters) != Digest(Config{})) {
 			return fmt.Errorf("E_ADDRESS_PAYLOAD")

@@ -21,8 +21,11 @@ listed in the [API reference](../api-reference.md).
 | `ipvlan-cni` | Allocation | Shared child on host-retained Ethernet parent, L2 mode |
 | `bond-cni` | Operation | 2–8 exclusive Ethernet members, active-backup, active failover MAC |
 | `vlan-cni` | Operation | VLAN 1–4094 on an approved Ethernet parent |
+| `tuning-cni` | Operation | Set per-interface IPv4 forwarding on an owned private sandbox Ethernet interface |
 | `accelerated-bridge-cni` | Operation | Host representor attachment to an approved existing Linux bridge |
 | `ovs-cni` | Operation | Host representor attachment to an approved existing OVS bridge |
+| `ipam` | Allocation | One IPv4 address from a dedicated subnet through `ipam.schseba.github.io` |
+| `address-cni` | Operation | Apply a granted IPAM lease to an owned private Ethernet interface |
 
 Macvlan/ipvlan are allocation roots in this POC: their parent capacity is managed
 by DRA. They are not general arbitrary child operations on every other output.
@@ -35,6 +38,8 @@ bond/VLAN inputs.
   `Builtin` calls a compiled internal planner; `EffectProgram` binds a typed
   declarative program. Neither launches a CNI executable.
 - `kind`: `Allocation` owns a DRA-selected root; `Operation` uses prior outputs.
+- `allocationDriver`: optional certified IPAM driver override; this does not
+  enable arbitrary third-party allocation drivers.
 - `configSchema`: closed JSON object schema. Unknown fields, bad types, missing
   required fields and out-of-range values fail before revision publication.
 - `inputs`/`outputs`: named ports with `type`, optional `linkType`, cardinality,
@@ -66,7 +71,11 @@ allocation identity, live state and journal before restoring before-images.
 All plugin families use the [serializable plugin SDK](../../pkg/pluginapi/README.md).
 Only the DRA framework discovers devices, publishes slices, authorizes effects,
 executes Linux/OVS changes and writes state. GA will replace internal calls with
-gRPC for every implementation; no plugin gains Kubernetes or journal authority.
+gRPC for every planner; planners receive no Kubernetes or journal authority.
+The stateful IPAM provider is a separate backend interface, with its own durable
+storage and authorized callers. The [production gRPC guide](../grpc-plugins.md)
+explains what owners build/deploy and includes proposed NetworkPlugin and service
+examples. `GRPC` and endpoint fields are not accepted by the current API.
 
 ## Declarative EffectProgram
 
@@ -96,7 +105,7 @@ validates compilation and outputs a preview revision; it does not publish API
 objects, assign an authoritative UID, check hardware or authorize execution.
 
 Supported opcode families include link move/configure, bond/master/VLAN,
-macvlan/ipvlan creation, driver bind, VF settings, PCI FLR, RDMA namespace,
+macvlan/ipvlan creation, per-interface IPv4 forwarding, driver bind, VF settings, PCI FLR, RDMA namespace,
 runtime device access, representor mapping/bridge/OVS attachment and shared
 uplink VLANs. Eswitch mode management is an administrator policy operation;
 placing its name in a topology budget alone cannot authorize a PF transition.
@@ -114,4 +123,6 @@ The certified `ipam` Allocation descriptor delegates allocation to
 `ipam.schseba.github.io` and exports an opaque `AddressLease/v2`. The
 `address-cni` Operation consumes that lease and a kernel interface, then plans
 `linux/address-configure/v1`. The backend runs in the framework processes;
-planners still receive no Kubernetes clients. See the [IPAM example](../../examples/ipam/README.md).
+planners still receive no Kubernetes clients. Runtime and capacity callers use
+`ipam.Provider` with the local ConfigMap backend; production will replace it with
+a gRPC client/provider service. See the [IPAM example](../../examples/ipam/README.md).

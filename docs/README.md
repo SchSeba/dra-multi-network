@@ -27,6 +27,7 @@ observation that users can read to inspect their network.
 ## Contributors and reviewers
 
 [Development](development.md), [plugin SDK](../pkg/pluginapi/README.md),
+[production gRPC plugin/provider design](grpc-plugins.md),
 [validation](validation.md) and [roadmap](roadmap.md) describe the current POC
 and its limits. Manual integration checks live in [test/integration](../test/integration/README.md),
 separate from installation and from tests that run without real hardware.

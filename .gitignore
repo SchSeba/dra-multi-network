@@ -6,3 +6,4 @@ vendor/
 bin/
 coverage.out
 /*-plan.yaml
+__pycache__/

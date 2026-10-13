@@ -75,11 +75,14 @@ func TestTransportContractAndFrameworkAuthorityFence(t *testing.T) {
 }
 
 func TestAllBuiltinPluginsUseSerializableHookContract(t *testing.T) {
-	for _, plugin := range []string{hostPlugin, sriovPlugin, macvlanPlugin, ipvlanPlugin, "bond-cni", "vlan-cni", "accelerated-bridge-cni", "ovs-cni", "ipam", "address-cni"} {
+	for _, plugin := range []string{hostPlugin, sriovPlugin, macvlanPlugin, ipvlanPlugin, "bond-cni", "vlan-cni", "tuning-cni", "accelerated-bridge-cni", "ovs-cni", "ipam", "address-cni"} {
 		for _, hook := range []string{sdk.NodePrepare, sdk.ConnectNetwork, sdk.RemoveNetwork, sdk.NodeUnprepare} {
 			call := sdk.Request{APIVersion: sdk.CallAPIVersion, ID: "step", Plugin: plugin, Version: "v1", Hook: hook,
 				Config: sdk.Config{Mode: "kernel", IfName: "net1", MTU: 1500, Up: true, Bridge: "fabric0", VlanID: 100}, Allocation: sdk.EffectRef{From: "call.allocation.step"},
 				Inputs: map[string][]sdk.EffectRef{"members": {{From: "granted.left"}, {From: "granted.right"}}, "parent": {{From: "granted.parent"}}, "interface": {{From: "granted.interface"}}, "lease": {{From: "granted.lease"}}, sdk.RepresentorPort: {{From: "granted.representor"}}}, RecordedExecution: "recorded-execution"}
+			if plugin == "tuning-cni" {
+				call.Config = sdk.Config{IPv4Forward: new(true)}
+			}
 			data, err := json.Marshal(call)
 			if err != nil {
 				t.Fatal(err)

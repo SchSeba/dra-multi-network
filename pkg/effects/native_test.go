@@ -4,6 +4,7 @@ package effects
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,7 +42,11 @@ func TestNativeBondVLANLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer n.Close()
-	p := Program{APIVersion: APIVersion, Exports: map[string]Ref{"interface": {From: "effects.vlan-state.interface"}}}
+	hostForwarding, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := Program{APIVersion: APIVersion, Exports: map[string]Ref{"interface": {From: "effects.forwarding.interface"}}}
 	add := func(id, kind string, c topology.Config, in map[string]Ref) {
 		p.Effects = append(p.Effects, Effect{ID: id, Kind: kind, Parameters: c, Inputs: in, Requires: []Predicate{{Kind: "allocation-and-owned-inputs"}}, Postconditions: []Predicate{{Kind: "native-state-match"}}, Recovery: Recovery{Strategy: "ObserveAndReconcile"}})
 	}
@@ -50,7 +55,8 @@ func TestNativeBondVLANLifecycle(t *testing.T) {
 	add("vlan", CreateVLAN, topology.Config{IfName: "tenant100", MTU: 1500, VlanID: 100}, map[string]Ref{"parent": {From: "effects.bond-state.interface"}})
 	label := "tenant100/app:blue"
 	add("vlan-state", Configure, topology.Config{IfName: "tenant100", MTU: 1500, Up: true, MAC: "02:42:ac:11:00:02", Alias: &label}, map[string]Ref{InterfacePort: {From: "effects.vlan.interface"}})
-	if err := Validate(p, []string{CreateBond, Configure, CreateVLAN}); err != nil {
+	add("forwarding", topology.IPv4Forwarding, topology.Config{IPv4Forward: new(true)}, map[string]Ref{InterfacePort: {From: "effects.vlan-state.interface"}})
+	if err := Validate(p, []string{CreateBond, Configure, CreateVLAN, topology.IPv4Forwarding}); err != nil {
 		t.Fatal(err)
 	}
 	ex := Execution{ID: "native-integration", Program: p}
@@ -80,6 +86,44 @@ func TestNativeBondVLANLifecycle(t *testing.T) {
 	}
 	if err := n.Verify(recovered); err != nil {
 		t.Fatal(err)
+	}
+	h := recovered.Outputs[InterfacePort]
+	if _, err := n.ipv4Forwarding(h, new(false)); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Verify(recovered); err == nil {
+		t.Fatal("forwarding drift passed readiness")
+	}
+	if err := n.Execute(&recovered, save); err != nil {
+		t.Fatal(err)
+	}
+	// A failed journal checkpoint must leave the sysctl untouched.
+	intent := p.Effects[len(p.Effects)-1]
+	intent.Inputs = map[string]Ref{InterfacePort: {From: "call.allocation.vlan"}}
+	intent.Parameters.IPv4Forward = new(false)
+	failed := Execution{ID: "failed-checkpoint", Roots: map[string]Handle{"vlan": h}, Program: Program{APIVersion: APIVersion, Effects: []Effect{intent}}}
+	checkpointErr := errors.New("checkpoint failed")
+	if err := n.Execute(&failed, func() error { return checkpointErr }); !errors.Is(err, checkpointErr) {
+		t.Fatalf("unexpected checkpoint failure: %v", err)
+	}
+	if actual, err := n.ipv4Forwarding(h, nil); err != nil || !actual {
+		t.Fatalf("mutated before checkpoint: %v", err)
+	}
+	failed.Records = nil // Reloading after a failed checkpoint has no saved intent.
+	if err := n.Execute(&failed, save); err != nil {
+		t.Fatal(err)
+	}
+	if actual, err := n.ipv4Forwarding(h, nil); err != nil || actual {
+		t.Fatalf("explicit false did not disable forwarding: %v", err)
+	}
+	if err := n.Restore(&failed, save); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Verify(recovered); err != nil {
+		t.Fatal("before-image was not restored", err)
+	}
+	if data, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward"); err != nil || string(data) != string(hostForwarding) {
+		t.Fatal("sandbox forwarding changed the host namespace", err)
 	}
 	configured, err := n.link(recovered.Outputs[InterfacePort])
 	if err != nil {
@@ -111,7 +155,19 @@ func TestNativeBondVLANLifecycle(t *testing.T) {
 	if err := n.sandbox.LinkSetAlias(configured, labeledAlias(recovered.Outputs[InterfacePort].Alias, label)); err != nil {
 		t.Fatal(err)
 	}
-	last := Execution{Records: []Record{recovered.Records[len(recovered.Records)-1]}}
+	forwardingIndex := len(recovered.Records) - 1
+	forwarding := Execution{Records: []Record{recovered.Records[forwardingIndex]}}
+	if forwarding.Records[0].IPv4ForwardBefore == nil {
+		t.Fatal("forwarding before-image lost during JSON recovery")
+	}
+	if err := n.Restore(&forwarding, save); err != nil {
+		t.Fatal(err)
+	}
+	if actual, err := n.ipv4Forwarding(h, nil); err != nil || actual != *forwarding.Records[0].IPv4ForwardBefore {
+		t.Fatal("forwarding before-image was not restored", err)
+	}
+	configureIndex := forwardingIndex - 1
+	last := Execution{Records: []Record{recovered.Records[configureIndex]}}
 	if err := n.Restore(&last, save); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +176,8 @@ func TestNativeBondVLANLifecycle(t *testing.T) {
 		t.Fatalf("configure did not restore its exact MAC/alias/MTU/state before-image: %v", err)
 	}
 	ex = recovered
-	ex.Records[len(ex.Records)-1] = last.Records[0]
+	ex.Records[configureIndex] = last.Records[0]
+	ex.Records[forwardingIndex] = forwarding.Records[0]
 	if saves < 10 {
 		t.Fatalf("missing durable checkpoints: %d", saves)
 	}

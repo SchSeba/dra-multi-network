@@ -95,12 +95,74 @@ administratively up after verifying its PCI identity; the primary PF was preserv
   Both VFs returned to host interfaces `msnicv0`/`msnicv1` without allocated IPv4
   addresses. The primary `eth1` management default route remained intact.
 
+The complete suite was rerun successfully after introducing the serializable
+`ipam.Provider` interface for driver reservations, attachment holders and
+controller inventory. The two-VF rerun assigned `192.0.2.2/29` and `.3/29` to
+the two moved interfaces and released all leases/holders. Software checks also
+exercise an injected provider with a lost committed reservation reply, replay,
+foreign-driver isolation, holder cleanup, malformed requests and inventory
+fencing. The local provider is tested; a real gRPC client/server remains future
+work described in the [production plugin guide](grpc-plugins.md).
+
 The implementation includes software/race checks, class/controller/admission
 validation, generated schemas, lint/vet and Helm rendering. This validates the
 mock lab, not host reboot recovery, production ledger scale, physical NIC
 performance or external-wire connectivity. The demo's ledger is bounded to
 240 KiB and retains replay tombstones until pool deletion. Released claim UIDs
 are fenced; use per-instance templates or recreate manual claims after unprepare.
+
+## Bond/VLAN tuning acceptance (2026-10-13)
+
+The driver was redeployed to the Kubernetes 1.37/CRI-O QEMU lab using
+`rrun 'make redeploy-dra-driver-virtual-cluster'`. Dedicated secondary PF
+`0000:29:00.0` was restored to native `igb`, with four `igbvf` VFs; the mock
+eswitch policy and temporary test bridge were removed. The node agent was
+restarted after rebinding to refresh interface inventory.
+
+- Both bond/VLAN Pods passed their init checks, including forwarding `1` on
+  VLAN interfaces 100/200/300, and bidirectional traffic on every VLAN during
+  normal operation and VF failover.
+- A temporary topology with explicit `ipv4Forward: false` passed with all three
+  VLAN forwarding values `0`, while `all`, `default`, `eth0` and `bond0` stayed
+  `1`. Its Pod, claim, namespace and topology were then removed.
+- All 119 tests in topology, networkplugins and effects passed. The privileged
+  native bond/VLAN lifecycle test also passed, covering drift repair, explicit
+  false, journal recovery, before-image restoration and host namespace isolation.
+
+This checks native QEMU igb forwarding and Linux sysctl execution. Host reboot
+recovery and physical NIC/fabric behavior remain unverified.
+
+## Native bond and OVS coexistence acceptance (2026-10-13)
+
+The [combined example](../examples/bond-ovs/README.md) passed in both single-node
+and one-control-plane/two-worker layouts. Deployment uses separate management,
+native igb and compiled mock switchdev NICs on every workload node. The mock
+was built from `main` commit `da72a741c756c705fb44a38065d0410b51b99085` against
+the running `5.14.0-427.el9.x86_64` guest kernel.
+
+- Four Pods ran together on the single node; eight ran together on the two
+  workers, with two native bond/VLAN Pods and two OVS Pods on each worker.
+- Native VFs passed bidirectional traffic on VLANs 100/200/300 and active-backup
+  member failover. The Pod init checks also verified per-VLAN IPv4 forwarding.
+- OVS representors passed bidirectional native VLAN 100 and tagged VLAN
+  200/300 traffic on each worker while the native bond Pods were running.
+- Native bond/VLAN traffic also passed in both directions between workers on
+  all three VLANs. Native addresses are distinct per worker.
+- Each worker retained four native `igbvf` VFs and four mock VFs, with two
+  representors attached to its approved OVS bridge. Management PFs had zero VFs.
+
+Live deployment found and fixed the management offload service's assumption
+that the primary NIC was `eth0`/`eth1`, and a VF ownership comparison between
+resolved and unresolved sysfs paths. Provisioning now identifies management by
+the default route, attests test NIC MACs against libvirt XML, waits for changed
+worker boot IDs, and creates VFs only on the two approved test PFs. The DRA
+DaemonSet runs on SR-IOV-capable nodes, so a multi-node control plane does not
+require an OVS socket. Plan rendering and NIC attestation/manifest rendering
+checks passed alongside the live runs.
+
+The multi-node cluster remains deployed with both scenarios running. Mock
+traffic across workers, physical NIC/fabric behavior and reboot recovery after
+mock installation remain unverified.
 
 ## Hardware acceptance still needed
 

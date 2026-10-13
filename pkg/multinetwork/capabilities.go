@@ -14,7 +14,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	api "github.com/SchSeba/dra-multi-network/pkg/api/networking/v1alpha1"
-	"github.com/SchSeba/dra-multi-network/pkg/ipam"
 	"github.com/SchSeba/dra-multi-network/pkg/topology"
 )
 
@@ -85,12 +84,12 @@ func (a *Agent) capabilityReport(ctx context.Context) (topology.NodeCapabilities
 		if err := a.client.Get(ctx, client.ObjectKey{Name: a.node.Name}, &currentNode); err != nil {
 			return report, err
 		}
-		pools, err := (ipam.Store{Client: a.client, Namespace: a.config.Flags.Namespace}).Pools(ctx)
+		pools, err := a.ipamProvider.ListPools(ctx)
 		if err != nil {
 			return report, err
 		}
 		for _, pool := range pools {
-			eligible := pool.Object.DeletionTimestamp.IsZero()
+			eligible := !pool.Deleting
 			for key, value := range pool.Config.NodeSelector {
 				eligible = eligible && currentNode.Labels[key] == value
 			}

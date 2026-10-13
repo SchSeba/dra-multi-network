@@ -18,6 +18,13 @@ GA architecture work:
 - Move **all** plugin implementations to external gRPC services using the existing
   serializable SDK and keeping DRA, policy grants, native execution and journaling
   in the framework.
+- Implement the IPAM `Provider` RPC client/server using the local interface's
+  inventory, reservation, lookup and holder/release call points; preserve global
+  uniqueness, entitlement checks, cleanup fencing and fixed subnet capacity.
+- Version the protobuf/handshake contract, authenticate and authorize services,
+  support remote NetworkPlugin endpoint configuration and retain compatible
+  cleanup services across upgrades. See the [owner/deployment guide](grpc-plugins.md)
+  for concrete proposed configuration and production acceptance work.
 - Define supported release/version/compatibility and deployment guarantees after
   the POC has been reviewed. The POC does not promise production recovery coverage.
 

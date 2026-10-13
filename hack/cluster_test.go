@@ -58,7 +58,7 @@ func TestClusterPlan(t *testing.T) {
 			// Ignore developer overrides while testing the checked-in defaults.
 			for _, entry := range os.Environ() {
 				key, _, _ := strings.Cut(entry, "=")
-				if !slices.Contains([]string{"CLUSTER_NAME", "CLUSTER_VERSION", "NETWORK_NAME", "SRIOV_NETWORK_NAME", "NETWORK_CIDR", "SRIOV_NETWORK_CIDR", "API_IP", "POD_CIDR", "SERVICE_CIDR", "VIRTUAL_ROUTER_ID", "NUM_OF_WORKERS"}, key) {
+				if !slices.Contains([]string{"CLUSTER_NAME", "CLUSTER_VERSION", "NETWORK_NAME", "SRIOV_NETWORK_NAME", "NETWORK_CIDR", "SRIOV_NETWORK_CIDR", "API_IP", "POD_CIDR", "SERVICE_CIDR", "VIRTUAL_ROUTER_ID", "NUM_OF_WORKERS", "MOCK_SMARTNIC_REPO"}, key) {
 					cmd.Env = append(cmd.Env, entry)
 				}
 			}
@@ -89,6 +89,7 @@ func TestClusterPlan(t *testing.T) {
 				VMRules      []map[string]struct {
 					Nets []struct {
 						Name string `json:"name"`
+						MAC  string `json:"mac"`
 					} `json:"nets"`
 				} `json:"vmrules"`
 			}
@@ -112,8 +113,22 @@ func TestClusterPlan(t *testing.T) {
 				}
 			}
 			var secondary bool
+			workloadNodes := 0
+			macs := map[string]bool{}
 			for _, rule := range plan.VMRules {
 				for _, vm := range rule {
+					if len(vm.Nets) > 1 {
+						workloadNodes++
+						if len(vm.Nets) != 3 || vm.Nets[0].Name != tc.network || vm.Nets[1].Name != tc.secondary || vm.Nets[2].Name != tc.secondary {
+							t.Fatalf("missing separate native and mock NICs: %+v", vm.Nets)
+						}
+						for _, nic := range vm.Nets[1:] {
+							if nic.MAC == "" || macs[nic.MAC] {
+								t.Fatalf("missing or duplicate test MAC: %+v", nic)
+							}
+							macs[nic.MAC] = true
+						}
+					}
 					for _, network := range vm.Nets {
 						if len(network.Name) > 15 {
 							t.Errorf("network name exceeds libvirt bridge limit: %s", network.Name)
@@ -123,6 +138,13 @@ func TestClusterPlan(t *testing.T) {
 						}
 					}
 				}
+			}
+			expectedNodes := tc.workers
+			if expectedNodes == 0 {
+				expectedNodes = 1
+			}
+			if workloadNodes != expectedNodes {
+				t.Fatalf("want %d workload nodes, got %d", expectedNodes, workloadNodes)
 			}
 			if !secondary {
 				t.Error("secondary network missing from VM plan")

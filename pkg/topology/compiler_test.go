@@ -35,6 +35,10 @@ func TestKernelTopology(t *testing.T) {
 		{"duplicate VLAN tag", `"vlanId":200`, `"vlanId":100`, "E_VLAN_DUPLICATE"},
 		{"missing false", `,"rdmaAccess":false`, "", "E_CONFIG_SCHEMA"},
 		{"denied effect", `linux/create-vlan/v1`, `linux/unknown/v1`, "E_EFFECT_DENIED"},
+		{"forwarding type", `"ipv4Forward":true`, `"ipv4Forward":1`, "E_CONFIG_SCHEMA"},
+		{"forwarding required", `"ipv4Forward":true`, `"ipv4Forward":null`, "E_CONFIG_SCHEMA"},
+		{"arbitrary sysctl", `"ipv4Forward":true`, `"sysctl":{"net.ipv4.ip_forward":"1"}`, "E_CONFIG_SCHEMA"},
+		{"denied forwarding", `linux/ipv4-forwarding/v1`, `linux/unknown/v1`, "E_EFFECT_DENIED"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -76,8 +80,24 @@ func TestKernelTopology(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(program.Effects) != 14 || len(program.Exports) != 6 {
+			if len(program.Effects) != 17 || len(program.Exports) != 9 {
 				t.Fatalf("unexpected program: %+v", program)
+			}
+			for _, id := range []string{"tune100", "tune200", "tune300"} {
+				ref := program.Exports[id+".configured"].From
+				found := false
+				for _, effect := range program.Effects {
+					if ref != "effects."+effect.ID+".interface" {
+						continue
+					}
+					found = true
+					if effect.Kind != topology.IPv4Forwarding || effect.Parameters.IPv4Forward == nil || !*effect.Parameters.IPv4Forward || effect.Inputs[topology.InterfacePort].From != "effects.tenant"+strings.TrimPrefix(id, "tune")+"-configure.interface" {
+						t.Fatalf("%s: forwarding not bound to its VLAN: %+v", id, effect)
+					}
+				}
+				if !found {
+					t.Fatalf("%s: missing tuning effect", id)
+				}
 			}
 			program.Effects[0].Inputs = map[string]effects.Ref{"parent": {From: "effects.future.interface"}}
 			if err := effects.Validate(program, revision.Topology.EffectBudget.Allow); err == nil {

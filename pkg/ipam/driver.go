@@ -17,7 +17,8 @@ import (
 )
 
 type Driver struct {
-	Store    Store
+	Provider Provider
+	Client   client.Client
 	NodeName string
 	Cancel   func(error)
 }
@@ -34,19 +35,23 @@ func (d *Driver) PrepareResourceClaims(ctx context.Context, claims []*resourceap
 	for _, claim := range claims {
 		response := kubeletplugin.PrepareResult{}
 		var current resourceapi.ResourceClaim
-		if err := d.Store.Client.Get(ctx, client.ObjectKeyFromObject(claim), &current); err != nil {
+		if err := d.Client.Get(ctx, client.ObjectKeyFromObject(claim), &current); err != nil {
 			response.Err = err
 		} else if current.UID != claim.UID || current.Status.Allocation == nil || Fingerprint(&current) != Fingerprint(claim) {
 			response.Err = fmt.Errorf("E_IPAM_CLAIM_IDENTITY")
 		} else {
 			var node corev1.Node
-			response.Err = d.Store.Client.Get(ctx, client.ObjectKey{Name: d.NodeName}, &node)
+			response.Err = d.Client.Get(ctx, client.ObjectKey{Name: d.NodeName}, &node)
 			if response.Err == nil {
 				for _, r := range claim.Status.Allocation.Devices.Results {
 					if r.Driver != topology.IPAMDriver {
 						continue
 					}
-					if _, err := d.Store.Reserve(ctx, claim, r, node); err != nil {
+					request, err := ReservationRequest(claim, r, node)
+					if err == nil {
+						_, err = d.Provider.Reserve(ctx, request)
+					}
+					if err != nil {
 						response.Err = err
 						break
 					}
@@ -61,7 +66,7 @@ func (d *Driver) PrepareResourceClaims(ctx context.Context, claims []*resourceap
 func (d *Driver) UnprepareResourceClaims(ctx context.Context, claims []kubeletplugin.NamespacedObject) (map[types.UID]error, error) {
 	results := map[types.UID]error{}
 	for _, claim := range claims {
-		results[claim.UID] = d.Store.Release(ctx, claim.UID)
+		results[claim.UID] = d.Provider.Release(ctx, string(claim.UID))
 	}
 	return results, nil
 }

@@ -95,6 +95,7 @@ type Agent struct {
 	store          *journal.Store
 	helper         *kubeletplugin.Helper
 	ipamHelper     *kubeletplugin.Helper
+	ipamProvider   ipam.Provider
 	stub           stub.Stub
 	mutation       chan struct{}
 	inventory      map[string]Inventory
@@ -183,11 +184,12 @@ func Run(ctx context.Context, config *nodeconfig.Config) error {
 		return err
 	}
 	defer a.helper.Stop()
+	a.ipamProvider = ipam.Store{Client: a.client, Namespace: config.Flags.Namespace}
 	ipamPath := filepath.Join(config.Flags.KubeletPluginsDirectoryPath, topology.IPAMDriver)
 	if err := os.MkdirAll(ipamPath, 0750); err != nil {
 		return err
 	}
-	a.ipamHelper, err = kubeletplugin.Start(ctx, &ipam.Driver{Store: ipam.Store{Client: a.client, Namespace: config.Flags.Namespace}, NodeName: a.node.Name, Cancel: config.CancelMainCtx}, kubeletplugin.KubeClient(config.K8sClient.Interface), kubeletplugin.NodeName(a.node.Name), kubeletplugin.DriverName(topology.IPAMDriver), kubeletplugin.RegistrarDirectoryPath(config.Flags.KubeletRegistrarDirectoryPath), kubeletplugin.PluginDataDirectoryPath(ipamPath))
+	a.ipamHelper, err = kubeletplugin.Start(ctx, &ipam.Driver{Provider: a.ipamProvider, Client: a.client, NodeName: a.node.Name, Cancel: config.CancelMainCtx}, kubeletplugin.KubeClient(config.K8sClient.Interface), kubeletplugin.NodeName(a.node.Name), kubeletplugin.DriverName(topology.IPAMDriver), kubeletplugin.RegistrarDirectoryPath(config.Flags.KubeletRegistrarDirectoryPath), kubeletplugin.PluginDataDirectoryPath(ipamPath))
 	if err != nil {
 		return err
 	}
@@ -488,11 +490,11 @@ func (a *Agent) prepare(ctx context.Context, claim *resourceapi.ResourceClaim) (
 			if topology.Digest(actual) != topology.Digest(expected) {
 				return p, fmt.Errorf("E_IPAM_ROOT_CONFIG")
 			}
-			pool, err := a.ipamStore().ForConfig(ctx, actual)
+			pool, err := a.ipamProvider.GetPool(ctx, result.Pool)
 			if err != nil {
 				return p, err
 			}
-			if result.Pool != pool.Object.Name || result.Device != "subnet" {
+			if pool.Deleting || actual.Network != pool.Config.Network || actual.Subnet != pool.Config.Subnet || result.Pool != pool.Name || result.Device != "subnet" {
 				return p, fmt.Errorf("E_IPAM_ALLOCATION_SCOPE")
 			}
 			p.IPAMRoots = append(p.IPAMRoots, IPAMRoot{Step: binding.RootStep, Result: result, Lease: ipam.Reservation(claim, result, pool)})

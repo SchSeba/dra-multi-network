@@ -5,7 +5,7 @@ case ${1:-} in
   ovs) name=switchdev-ovs; subnet=216 ;;
   *) echo "usage: $0 bridge|ovs" >&2; exit 1 ;;
 esac
-namespace=multi-network-example
+namespace=${DRA_EXAMPLE_NAMESPACE:-multi-network-example}
 for suffix in a b; do
   pod=$name-$suffix
   kubectl -n "$namespace" wait --for=condition=Ready "pod/$pod" --timeout=180s

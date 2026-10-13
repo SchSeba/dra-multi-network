@@ -4,8 +4,6 @@ package ipam
 
 import (
 	"context"
-	"fmt"
-	"net/netip"
 	"sort"
 	"strconv"
 	"time"
@@ -23,7 +21,8 @@ import (
 )
 
 type Publisher struct {
-	Store      Store
+	Provider   Provider
+	Client     client.Client
 	KubeClient kubernetes.Interface
 }
 
@@ -52,12 +51,8 @@ func (p *Publisher) Start(ctx context.Context) error {
 }
 func (p *Publisher) resources(ctx context.Context) (resourceslice.DriverResources, error) {
 	resources := resourceslice.DriverResources{Pools: map[string]resourceslice.Pool{}}
-	pools, err := p.Store.Pools(ctx)
-	if err != nil {
-		return resources, err
-	}
 	var claims resourceapi.ResourceClaimList
-	if err := p.Store.Client.List(ctx, &claims); err != nil {
+	if err := p.Client.List(ctx, &claims); err != nil {
 		return resources, err
 	}
 	fingerprints := map[string]string{}
@@ -66,37 +61,11 @@ func (p *Publisher) resources(ctx context.Context) (resourceslice.DriverResource
 			fingerprints[string(claim.UID)] = Fingerprint(&claim)
 		}
 	}
-	for i, pool := range pools {
-		if err := p.Store.ValidatePrimaryRanges(ctx, pool); err != nil {
-			return resources, err
-		}
-		prefix, _ := netip.ParsePrefix(pool.Config.Subnet)
-		for j := 0; j < i; j++ {
-			other, _ := netip.ParsePrefix(pools[j].Config.Subnet)
-			if prefix.Overlaps(other) {
-				return resources, fmt.Errorf("E_IPAM_POOL_OVERLAP")
-			}
-		}
-		if !pool.Object.DeletionTimestamp.IsZero() {
-			continue
-		}
-		if err := p.Store.EnsureLedger(ctx, pool); err != nil {
-			return resources, err
-		}
-		pool, err = p.Store.Load(ctx, pool.Object.Name)
-		if err != nil {
-			return resources, err
-		}
-		_, leases, err := p.Store.ledger(ctx, pool)
-		if err != nil {
-			return resources, err
-		}
-		ready := true
-		for _, lease := range leases {
-			if lease.State != Released && fingerprints[lease.ClaimUID] != lease.Fingerprint {
-				ready = false
-			}
-		}
+	pools, err := p.Provider.Inventory(ctx, fingerprints)
+	if err != nil {
+		return resources, err
+	}
+	for _, pool := range pools {
 		var keys []string
 		for key := range pool.Config.NodeSelector {
 			keys = append(keys, key)
@@ -107,43 +76,9 @@ func (p *Publisher) resources(ctx context.Context) (resourceslice.DriverResource
 			term.MatchExpressions = append(term.MatchExpressions, corev1.NodeSelectorRequirement{Key: key, Operator: corev1.NodeSelectorOpIn, Values: []string{pool.Config.NodeSelector[key]}})
 		}
 		d := resourceapi.Device{Name: "subnet", AllowMultipleAllocations: ptr.To(true), Attributes: map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
-			resourceapi.QualifiedName(topology.IPAMDriver + "/network"): {StringValue: ptr.To(pool.Config.Network)}, resourceapi.QualifiedName(topology.IPAMDriver + "/subnet"): {StringValue: ptr.To(pool.Config.Subnet)}, resourceapi.QualifiedName(topology.IPAMDriver + "/allocationReady"): {BoolValue: ptr.To(ready)},
-		}, Capacity: map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{resourceapi.QualifiedName(topology.AddressCapacity): {Value: resource.MustParse(strconv.Itoa(len(pool.Addresses))), RequestPolicy: &resourceapi.CapacityRequestPolicy{Default: ptr.To(resource.MustParse("1")), ValidValues: []resource.Quantity{resource.MustParse("1")}}}}}
-		resources.Pools[pool.Object.Name] = resourceslice.Pool{NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{term}}, Slices: []resourceslice.Slice{{Devices: []resourceapi.Device{d}}}}
+			resourceapi.QualifiedName(topology.IPAMDriver + "/network"): {StringValue: ptr.To(pool.Config.Network)}, resourceapi.QualifiedName(topology.IPAMDriver + "/subnet"): {StringValue: ptr.To(pool.Config.Subnet)}, resourceapi.QualifiedName(topology.IPAMDriver + "/allocationReady"): {BoolValue: ptr.To(pool.AllocationReady)},
+		}, Capacity: map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{resourceapi.QualifiedName(topology.AddressCapacity): {Value: resource.MustParse(strconv.Itoa(pool.Capacity)), RequestPolicy: &resourceapi.CapacityRequestPolicy{Default: ptr.To(resource.MustParse("1")), ValidValues: []resource.Quantity{resource.MustParse("1")}}}}}
+		resources.Pools[pool.Name] = resourceslice.Pool{NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{term}}, Slices: []resourceslice.Slice{{Devices: []resourceapi.Device{d}}}}
 	}
-	return resources, p.gcLedgers(ctx, pools)
-}
-func (p *Publisher) gcLedgers(ctx context.Context, pools []Pool) error {
-	names := map[string]bool{}
-	for _, pool := range pools {
-		names[LedgerName(pool)] = true
-	}
-	var ledgers corev1.ConfigMapList
-	if err := p.Store.Client.List(ctx, &ledgers, client.InNamespace(p.Store.Namespace), client.MatchingLabels{LedgerLabel: topology.CapabilityReadyValue}); err != nil {
-		return err
-	}
-	for _, cm := range ledgers.Items {
-		if names[cm.Name] {
-			continue
-		}
-		var leases map[string]Lease
-		if err := topology.Decode([]byte(cm.Data["leases"]), &leases); err != nil {
-			return err
-		}
-		active := false
-		for _, lease := range leases {
-			active = active || lease.State != Released
-		}
-		if active {
-			continue
-		}
-		cm.Finalizers = nil
-		if err := p.Store.Client.Update(ctx, &cm); err != nil {
-			return err
-		}
-		if err := p.Store.Client.Delete(ctx, &cm); client.IgnoreNotFound(err) != nil {
-			return err
-		}
-	}
-	return nil
+	return resources, nil
 }

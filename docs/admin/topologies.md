@@ -22,6 +22,9 @@ flowchart LR
   B --> D[tenant100: VLAN 100]
   B --> E[tenant200: VLAN 200]
   B --> F[tenant300: VLAN 300]
+  D --> G[tune100: IPv4 forwarding]
+  E --> H[tune200: IPv4 forwarding]
+  F --> I[tune300: IPv4 forwarding]
 ```
 
 For example, the bond input is:
@@ -42,6 +45,8 @@ config:
 
 A VLAN uses `parent: {from: uplink.interface}`. Operation steps allocate no
 additional physical device; the complete DAG executes once for the claim.
+Each VLAN feeds `tuning-cni` through `interface: {from: tenant100.interface}`
+(or the corresponding VLAN) with `config: {ipv4Forward: true}`.
 
 ## Configuration and composition validation
 

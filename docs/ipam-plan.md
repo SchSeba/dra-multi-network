@@ -222,7 +222,8 @@ reuse of one allocated claim requires explicit preparation-incarnation fencing.
 
 The existing controller hosts `pkg/ipam.Publisher` under leader election. The
 existing node process registers a second kubelet DRA plugin with the IPAM driver
-name. Both use `pkg/ipam.Store`; no additional binary or deployment is needed.
+name. Both call `pkg/ipam.Provider`, implemented by the local `pkg/ipam.Store`;
+no additional binary or deployment is needed.
 `pkg/topology/ipam.go` supplies the two certified descriptors, and
 `pkg/effects/address.go` applies/restores only the address named by the granted
 lease on an owned private sandbox interface.
@@ -240,6 +241,26 @@ consumers, SDK serialization and private-interface address grants. The
 [integration suite](../test/integration/ipam/README.md) checks five unique IPs,
 secondary traffic, sixth-claim exhaustion, cleanup/reuse, same-boot restart and
 two-VF/two-IP allocation. Acceptance results belong in [validation](validation.md).
+
+## Interface calls and production transport
+
+The implemented `ipam.Provider` interface defines the future RPC call points:
+`ListPools`, `GetPool`, `Inventory`, `Reserve`, `Lookup`, `AcquireHolder`,
+`ReleaseHolder` and `Release`. The driver verifies live Kubernetes entitlement
+before creating a serializable `ReserveRequest`. NRI journals attachment identity
+before holder acquisition, and releases that holder after verified native cleanup.
+The controller passes verified claim fingerprints into backend inventory, then
+publishes the returned total capacity itself. The local Store preserves the
+existing ConfigMap CAS, ledger UID and replay/cleanup behavior behind this interface.
+
+Production should inject a gRPC client implementing the same interface and run
+the authoritative backend as a separate service with shared durable storage.
+The pure `ipam` and `address-cni` planners will also become gRPC services, through
+their separate planner SDK. They do not perform provider mutations themselves.
+The [production plugin guide](grpc-plugins.md) maps each interface method to its
+proposed RPC and gives owner/deployment and NetworkPlugin configuration examples.
+Authentication, protobuf, remote adapters and CRD endpoint support remain future
+work; this extension does not implement a network transport.
 
 ## Scope left out of the first example
 

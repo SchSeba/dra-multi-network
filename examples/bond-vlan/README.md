@@ -3,7 +3,16 @@
 Two independently allocated VF roots become `vfleft` and `vfright`, members of
 active-backup `bond0`. Three operation steps create `tenant100`, `tenant200` and
 `tenant300`, carrying VLANs 100, 200 and 300. The claim requests both generated
-DeviceClasses; bond/VLAN steps allocate no extra physical devices.
+DeviceClasses; bond/VLAN/tuning steps allocate no extra physical devices.
+
+Each VLAN feeds a `tuning-cni` Operation with `config: {ipv4Forward: true}`.
+It sets `net.ipv4.conf.<interface>.forwarding = 1` in the Pod's network namespace.
+The workload checks all three values. This is per-interface IPv4 forwarding;
+namespace-wide `net.ipv4.ip_forward`, other sysctls and routes are not configured.
+The framework records the original value before writing, verifies it at readiness,
+and restores it during cleanup. The plugin only returns effects through the
+[shared request/result contract](../../pkg/pluginapi/README.md), so its planner
+can move behind gRPC without gaining namespace or journal access.
 
 Commands below run from the repository root. Install the [driver](../../docs/installation.md),
 set `KUBECONFIG`, and adapt policy/topology PCI addresses to dedicated secondary
@@ -13,6 +22,13 @@ workloads require only normal namespaced Pod/claim permissions.
 Edit the PF address in `policy.yaml` and both root selectors in `topology.yaml`.
 One Pod requires two free VFs; the peer/traffic check needs four total. The
 fabric must permit these VLANs and the expected MAC/failover behavior.
+
+The PF must be up and provide VF-to-VF forwarding. The QEMU igb lab uses the
+native `igb` PF and `igbvf` VF drivers for this example. If the dedicated PF was
+previously rebound to the switchdev mock, drain all driver claims and restore
+the native drivers, then restart the node agent to refresh its interface
+inventory before creating new claims. This example does not connect host
+representors or configure an eswitch forwarding path.
 
 ```bash
 ./examples/bond-vlan/apply.sh

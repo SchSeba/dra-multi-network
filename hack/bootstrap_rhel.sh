@@ -259,7 +259,7 @@ cat <<EOF
 
 Next:
   cd ${REPO_ROOT}
-  make deploy-single-node-virtual-cluster-standalone
+  make deploy-single-node-virtual-cluster
 
 Notes:
   - Single-node VM wants ~10GiB RAM for the control plane.

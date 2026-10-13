@@ -65,22 +65,23 @@ type LinkState struct {
 	MasterIndex int    `json:"masterIndex"`
 }
 type Record struct {
-	Effect        Effect              `json:"effect"`
-	Inputs        map[string]Handle   `json:"inputs"`
-	Before        *LinkState          `json:"before,omitempty"`
-	Output        Handle              `json:"output"`
-	Created       *Handle             `json:"created,omitempty"`
-	PCI           *PCIState           `json:"pci,omitempty"`
-	VF            *VFState            `json:"vf,omitempty"`
-	Reset         *ResetState         `json:"reset,omitempty"`
-	KernelRestore *KernelRestoreState `json:"kernelRestore,omitempty"`
-	RDMA          *RDMAState          `json:"rdma,omitempty"`
-	Outputs       map[string]Handle   `json:"outputs,omitempty"`
-	State         string              `json:"state"`
-	Bridge        *BridgePortState    `json:"bridge,omitempty"`
-	OVS           *OVSPortState       `json:"ovs,omitempty"`
-	Uplinks       []UplinkLease       `json:"uplinks,omitempty"`
-	UplinkOwner   string              `json:"uplinkOwner,omitempty"`
+	IPv4ForwardBefore *bool               `json:"ipv4ForwardBefore,omitempty"`
+	Effect            Effect              `json:"effect"`
+	Inputs            map[string]Handle   `json:"inputs"`
+	Before            *LinkState          `json:"before,omitempty"`
+	Output            Handle              `json:"output"`
+	Created           *Handle             `json:"created,omitempty"`
+	PCI               *PCIState           `json:"pci,omitempty"`
+	VF                *VFState            `json:"vf,omitempty"`
+	Reset             *ResetState         `json:"reset,omitempty"`
+	KernelRestore     *KernelRestoreState `json:"kernelRestore,omitempty"`
+	RDMA              *RDMAState          `json:"rdma,omitempty"`
+	Outputs           map[string]Handle   `json:"outputs,omitempty"`
+	State             string              `json:"state"`
+	Bridge            *BridgePortState    `json:"bridge,omitempty"`
+	OVS               *OVSPortState       `json:"ovs,omitempty"`
+	Uplinks           []UplinkLease       `json:"uplinks,omitempty"`
+	UplinkOwner       string              `json:"uplinkOwner,omitempty"`
 }
 type Execution struct {
 	ID      string            `json:"id"`
@@ -534,6 +535,14 @@ func (n *Native) Execute(ex *Execution, save func() error) error {
 					return err
 				}
 			}
+			if e.Kind == topology.IPv4Forwarding {
+				input := rec.Inputs[InterfacePort]
+				before, err := n.ipv4Forwarding(input, nil)
+				if err != nil {
+					return err
+				}
+				rec.IPv4ForwardBefore, rec.Output = &before, input
+			}
 			if e.Kind == topology.DriverBind || e.Kind == topology.PCIReset {
 				var err error
 				if e.Kind == topology.PCIReset {
@@ -653,6 +662,13 @@ func (n *Native) Execute(ex *Execution, save func() error) error {
 	return save()
 }
 func (n *Native) apply(r *Record, save func() error) error {
+	if r.Effect.Kind == topology.IPv4Forwarding {
+		if r.IPv4ForwardBefore == nil || r.Effect.Parameters.IPv4Forward == nil {
+			return fmt.Errorf("E_TUNING_RECORD")
+		}
+		_, err := n.ipv4Forwarding(r.Output, r.Effect.Parameters.IPv4Forward)
+		return err
+	}
 	if r.Effect.Kind == topology.AddressConfigure {
 		return n.applyAddress(*r)
 	}
@@ -895,6 +911,19 @@ func (n *Native) apply(r *Record, save func() error) error {
 	}
 }
 func (n *Native) observe(r Record) error {
+	if r.Effect.Kind == topology.IPv4Forwarding {
+		if r.IPv4ForwardBefore == nil || r.Effect.Parameters.IPv4Forward == nil {
+			return fmt.Errorf("E_TUNING_RECORD")
+		}
+		actual, err := n.ipv4Forwarding(r.Output, nil)
+		if err != nil {
+			return err
+		}
+		if actual != *r.Effect.Parameters.IPv4Forward {
+			return fmt.Errorf("E_TUNING_STATE: IPv4 forwarding differs")
+		}
+		return nil
+	}
 	if r.Effect.Kind == topology.AddressConfigure {
 		return n.observeAddress(r)
 	}
@@ -1011,6 +1040,16 @@ func (n *Native) Restore(ex *Execution, save func() error) error {
 	for i := len(ex.Records) - 1; i >= 0; i-- {
 		r := &ex.Records[i]
 		if r.State == Restored {
+			continue
+		}
+		if r.Effect.Kind == topology.IPv4Forwarding {
+			if err := n.restoreIPv4Forwarding(*r); err != nil {
+				return err
+			}
+			r.State = Restored
+			if err := save(); err != nil {
+				return err
+			}
 			continue
 		}
 		if r.Effect.Kind == topology.AddressConfigure {
